@@ -40,6 +40,7 @@
 
 // Power / Other
 #define BOARD_KEYBOARD_LED 42
+#define BOARD_POWERON      10
 #define BOARD_BAT_ADC      4
 #define BOARD_1V8_EN       38
 #define BOARD_GPS_EN       39
