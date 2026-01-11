@@ -28,7 +28,6 @@ std::function<void()> idleCallback;
     TerminalEmulator& terminal;
     KeyboardManager& keyboard;
     DisplayManager& display;
-    // TouchManager& touch;
     Preferences preferences;
     
     struct WifiCreds {

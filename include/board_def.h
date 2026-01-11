@@ -34,10 +34,6 @@
 #define BOARD_SPI_MOSI  33
 #define BOARD_SPI_MISO  47 
 
-// Touch (CST328)
-#define BOARD_TOUCH_INT 12
-#define BOARD_TOUCH_RST 45
-
 // Vibration Motor
 #define BOARD_VIBRATION 2
 
