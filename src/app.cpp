@@ -55,8 +55,9 @@ void App::initializeHardware() {
     pinMode(BOARD_6609_EN, OUTPUT);
     digitalWrite(BOARD_6609_EN, HIGH);
     
+    // Backlight handled by KeyboardManager (keep off during boot)
     pinMode(BOARD_KEYBOARD_LED, OUTPUT);
-    digitalWrite(BOARD_KEYBOARD_LED, HIGH);
+    digitalWrite(BOARD_KEYBOARD_LED, LOW);
 
     // Disable SPI devices
     pinMode(BOARD_SD_CS, OUTPUT);

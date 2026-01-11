@@ -1,6 +1,7 @@
 #include "keyboard_manager.h"
 #include "board_def.h"
 #include "keymap.h"
+#include <Preferences.h>
 
 KeyboardManager::KeyboardManager() 
     : sym_active(false), shift_active(false), ctrl_active(false), alt_active(false) {
@@ -9,7 +10,14 @@ KeyboardManager::KeyboardManager()
 bool KeyboardManager::begin() {
     // Setup Backlight
     pinMode(BOARD_KEYBOARD_LED, OUTPUT);
-    digitalWrite(BOARD_KEYBOARD_LED, HIGH); // Default On
+    
+    // Restore Backlight Preference
+    Preferences prefs;
+    prefs.begin("tdeck", true); // Read-only
+    bool bl = prefs.getBool("backlight", false); // Default Off
+    prefs.end();
+    
+    digitalWrite(BOARD_KEYBOARD_LED, bl ? HIGH : LOW);
 
     // Setup Vibration (PWM)
     ledcSetup(0, 2000, 8); // Channel 0, 2kHz, 8-bit
@@ -189,6 +197,12 @@ void KeyboardManager::vibrationTask(void* parameter) {
 
 void KeyboardManager::setBacklight(bool on) {
     digitalWrite(BOARD_KEYBOARD_LED, on ? HIGH : LOW);
+    
+    // Save Preference
+    Preferences prefs;
+    prefs.begin("tdeck", false); // Read-write
+    prefs.putBool("backlight", on);
+    prefs.end();
 }
 
 void KeyboardManager::toggleBacklight() {

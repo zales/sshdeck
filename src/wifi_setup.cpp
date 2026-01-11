@@ -1,23 +1,20 @@
-#include "wifi_manager.h"
+#if 0
+#include "wifi_setup.h"
 #include "ui/menu_system.h" 
 #include <vector>
 #include <functional>
 
 extern void drawTerminalScreen();
 
-WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp)
-    : terminal(term), keyboard(kb), display(disp), security(nullptr) {
+WifiSetup::WifiSetup(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp)
+    : terminal(term), keyboard(kb), display(disp) {
 }
 
-void WifiManager::setSecurityManager(SecurityManager* sec) {
-    security = sec;
-}
-
-void WifiManager::setIdleCallback(std::function<void()> cb) {
+void WifiSetup::setIdleCallback(std::function<void()> cb) {
     idleCallback = cb;
 }
 
-void WifiManager::loadCredentials() {
+void WifiSetup::loadCredentials() {
     preferences.begin("tdeck-wifi", true); // RO
     maxSavedIndex = preferences.getInt("count", 0);
     
@@ -26,19 +23,7 @@ void WifiManager::loadCredentials() {
     
     for (int i=0; i<maxSavedIndex; i++) {
         String s = preferences.getString(("ssid" + String(i)).c_str(), "");
-        String rawPass = preferences.getString(("pass" + String(i)).c_str(), "");
-        String p = rawPass;
-        
-        if (security && !rawPass.isEmpty()) {
-            String decrypted = security->decrypt(rawPass);
-            // If decrypt fail but raw not empty -> assume legacy plaintext
-            if (decrypted.isEmpty() && !rawPass.isEmpty()) {
-                p = rawPass;
-            } else {
-                p = decrypted;
-            }
-        }
-        
+        String p = preferences.getString(("pass" + String(i)).c_str(), "");
         savedNetworks[i].ssid = s;
         savedNetworks[i].pass = p;
     }
@@ -47,7 +32,7 @@ void WifiManager::loadCredentials() {
     preferences.end();
 }
 
-void WifiManager::saveCredentials(const String& ssid, const String& pass) {
+void WifiSetup::saveCredentials(const String& ssid, const String& pass) {
     preferences.begin("tdeck-wifi", false); // RW
     
     // Check if exists
@@ -62,18 +47,14 @@ void WifiManager::saveCredentials(const String& ssid, const String& pass) {
     if (existingIndex != -1) {
         // Update password
         savedNetworks[existingIndex].pass = pass;
-        String storePass = security ? security->encrypt(pass) : pass;
-        preferences.putString(("pass" + String(existingIndex)).c_str(), storePass.c_str());
+        preferences.putString(("pass" + String(existingIndex)).c_str(), pass);
     } else {
         // Add new
         if (maxSavedIndex < MAX_SAVED_NETWORKS) {
             savedNetworks[maxSavedIndex].ssid = ssid;
             savedNetworks[maxSavedIndex].pass = pass;
             preferences.putString(("ssid" + String(maxSavedIndex)).c_str(), ssid);
-            
-            String storePass = security ? security->encrypt(pass) : pass;
-            preferences.putString(("pass" + String(maxSavedIndex)).c_str(), storePass.c_str());
-            
+            preferences.putString(("pass" + String(maxSavedIndex)).c_str(), pass);
             maxSavedIndex++;
             preferences.putInt("count", maxSavedIndex);
         } else {
@@ -82,32 +63,18 @@ void WifiManager::saveCredentials(const String& ssid, const String& pass) {
              savedNetworks[idx].ssid = ssid;
              savedNetworks[idx].pass = pass;
              preferences.putString(("ssid" + String(idx)).c_str(), ssid);
-             
-             String storePass = security ? security->encrypt(pass) : pass;
-             preferences.putString(("pass" + String(idx)).c_str(), storePass.c_str());
+             preferences.putString(("pass" + String(idx)).c_str(), pass);
         }
     }
     preferences.end();
 }
 
-void WifiManager::reEncryptAll() {
-    // Assumes savedNetworks[] is populated with plaintext (decrypted on load)
-    // and that SecurityManager has the NEW key set.
-    preferences.begin("tdeck-wifi", false);
-    for(int i=0; i<maxSavedIndex; i++) {
-         String p = savedNetworks[i].pass;
-         String storePass = security ? security->encrypt(p) : p;
-         preferences.putString(("pass" + String(i)).c_str(), storePass.c_str());
-    }
-    preferences.end();
-}
-
-void WifiManager::refreshScreen() {
+void WifiSetup::refreshScreen() {
     drawTerminalScreen();
 }
 
 // Helper to enter text using the MenuSystem's UI style
-String WifiManager::readInput(const String& prompt, bool passwordMask) {
+String WifiSetup::readInput(const String& prompt, bool passwordMask) {
     MenuSystem menu(display, keyboard);
     menu.setIdleCallback(idleCallback);
     String result = "";
@@ -117,7 +84,7 @@ String WifiManager::readInput(const String& prompt, bool passwordMask) {
     return "";
 }
 
-bool WifiManager::connect() {
+bool WifiSetup::connect() {
     loadCredentials();
     MenuSystem menu(display, keyboard);
     menu.setIdleCallback(idleCallback);
@@ -129,18 +96,12 @@ bool WifiManager::connect() {
             bool abort = false;
             
             int lastRemain = -1;
-            
             while (millis() - start < 3000) {
                 int remain = 3 - (millis() - start)/1000;
-                
-                // Only redraw if the second changed
                 if (remain != lastRemain) {
                     lastRemain = remain;
-                    
-                    // Partial refresh is faster and less blinky
                     display.setRefreshMode(true);
                     
-                    // Render stylish auto-connect screen
                     display.getDisplay().firstPage();
                     do {
                         display.getDisplay().fillScreen(GxEPD_WHITE);
@@ -267,7 +228,7 @@ bool WifiManager::connect() {
     }
 }
 
-bool WifiManager::tryConnect(const String& ssid, const String& pass) {
+bool WifiSetup::tryConnect(const String& ssid, const String& pass) {
     display.getDisplay().firstPage();
     do {
          display.getDisplay().fillScreen(GxEPD_WHITE);
@@ -298,7 +259,7 @@ bool WifiManager::tryConnect(const String& ssid, const String& pass) {
     return true;
 }
 
-void WifiManager::scanAndSelect() {
+void WifiSetup::scanAndSelect() {
     display.getDisplay().firstPage();
     do {
          display.getDisplay().fillScreen(GxEPD_WHITE);
@@ -419,11 +380,11 @@ void WifiManager::scanAndSelect() {
     }
 }
 
-String WifiManager::readInput(bool passwordMask) {
+String WifiSetup::readInput(bool passwordMask) {
     return readInput("Enter Value:", passwordMask);
 }
 
-void WifiManager::deleteCredential(int index) {
+void WifiSetup::deleteCredential(int index) {
     if (index < 0 || index >= maxSavedIndex) return;
     
     preferences.begin("tdeck-wifi", false);
@@ -444,7 +405,7 @@ void WifiManager::deleteCredential(int index) {
     preferences.end();
 }
 
-void WifiManager::manage() {
+void WifiSetup::manage() {
     loadCredentials();
     MenuSystem menu(display, keyboard);
     menu.setIdleCallback(idleCallback);
@@ -538,3 +499,4 @@ void WifiManager::manage() {
         }
     }
 }
+#endif
