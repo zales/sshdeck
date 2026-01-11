@@ -170,16 +170,46 @@ void App::enterDeepSleep() {
     esp_deep_sleep_start();
 }
 
+// Li-Po discharge curve adapted from Meshtastic firmware
+// Uses a slightly more generous curve for mid-range voltage
+static const uint32_t BATTERY_CURVE[][2] = {
+    {4190, 100}, {4050, 90}, {3990, 80}, {3890, 70}, {3800, 60},
+    {3720, 50}, {3630, 40}, {3530, 30}, {3420, 20}, {3300, 10},
+    {3100, 0}
+};
+
 float App::getBatteryVoltage() {
-    uint32_t raw = analogRead(BOARD_BAT_ADC);
-    return (raw * 3.3 * 2.0) / 4095.0;
+    // Average multiple samples to reduce noise
+    uint32_t mv = 0;
+    const int SAMPLES = 20;
+    for(int i=0; i<SAMPLES; i++) {
+        // analogReadMilliVolts uses the factory calibration data for better accuracy
+        mv += analogReadMilliVolts(BOARD_BAT_ADC);
+        if (i < SAMPLES - 1) delay(1);
+    }
+    mv /= SAMPLES;
+
+    // Multiplier of 2.11 (vs theoretical 2.0) accounts for voltage drops/tolerances
+    // as seen in Meshtastic/T-Deck firmware
+    return (mv * 2.11) / 1000.0;
 }
 
 int App::getBatteryPercentage() {
     float v = getBatteryVoltage();
-    if (v < 3.3) return 0;
-    if (v > 4.2) return 100;
-    return (int)((v - 3.3) / (4.2 - 3.3) * 100.0);
+    int mv = (int)(v * 1000);
+    
+    if (mv >= 4190) return 100;
+    if (mv <= 3100) return 0;
+    
+    // Interpolate from table
+    for (int i = 0; i < 10; i++) {
+        if (mv >= BATTERY_CURVE[i+1][0]) {
+            return map(mv, BATTERY_CURVE[i+1][0], BATTERY_CURVE[i][0], 
+                       BATTERY_CURVE[i+1][1], BATTERY_CURVE[i][1]);
+        }
+    }
+    
+    return 0;
 }
 
 void App::drawTerminalScreen() {
