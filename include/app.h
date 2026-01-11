@@ -48,6 +48,7 @@ private:
     void checkPowerButton();
     float getBatteryVoltage();
     int getBatteryPercentage();
+    bool isCharging();
     void unlockSystem();
 
     // UI & Logic

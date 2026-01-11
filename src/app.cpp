@@ -46,14 +46,9 @@ void App::initializeHardware() {
     pinMode(BOARD_POWERON, OUTPUT);
     digitalWrite(BOARD_POWERON, HIGH);
     
-    pinMode(BOARD_1V8_EN, OUTPUT);
-    digitalWrite(BOARD_1V8_EN, HIGH); 
-    
-    pinMode(BOARD_GPS_EN, OUTPUT);
-    digitalWrite(BOARD_GPS_EN, HIGH);
-    
-    pinMode(BOARD_6609_EN, OUTPUT);
-    digitalWrite(BOARD_6609_EN, HIGH);
+    if (BOARD_1V8_EN >= 0) { pinMode(BOARD_1V8_EN, OUTPUT); digitalWrite(BOARD_1V8_EN, HIGH); }
+    if (BOARD_GPS_EN >= 0) { pinMode(BOARD_GPS_EN, OUTPUT); digitalWrite(BOARD_GPS_EN, HIGH); }
+    if (BOARD_6609_EN >= 0) { pinMode(BOARD_6609_EN, OUTPUT); digitalWrite(BOARD_6609_EN, HIGH); }
     
     // Backlight handled by KeyboardManager (keep off during boot)
     pinMode(BOARD_KEYBOARD_LED, OUTPUT);
@@ -158,9 +153,9 @@ void App::enterDeepSleep() {
     display.getDisplay().powerOff();
     
     digitalWrite(BOARD_KEYBOARD_LED, LOW);
-    digitalWrite(BOARD_1V8_EN, LOW);
-    digitalWrite(BOARD_GPS_EN, LOW);
-    digitalWrite(BOARD_6609_EN, LOW);
+    if (BOARD_1V8_EN >= 0) digitalWrite(BOARD_1V8_EN, LOW);
+    if (BOARD_GPS_EN >= 0) digitalWrite(BOARD_GPS_EN, LOW);
+    if (BOARD_6609_EN >= 0) digitalWrite(BOARD_6609_EN, LOW);
     digitalWrite(BOARD_POWERON, LOW);
 
     esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BOOT_BUTTON, 0); 
@@ -184,7 +179,11 @@ float App::getBatteryVoltage() {
     const int SAMPLES = 20;
     for(int i=0; i<SAMPLES; i++) {
         // analogReadMilliVolts uses the factory calibration data for better accuracy
-        mv += analogReadMilliVolts(BOARD_BAT_ADC);
+        if (BOARD_BAT_ADC >= 0) {
+            mv += analogReadMilliVolts(BOARD_BAT_ADC);
+        } else {
+            mv += 2000; // Dummy value for T-Deck Pro until I2C PMU driver added
+        }
         if (i < SAMPLES - 1) delay(1);
     }
     mv /= SAMPLES;
@@ -210,6 +209,21 @@ int App::getBatteryPercentage() {
     }
     
     return 0;
+}
+
+bool App::isCharging() {
+    // T-Deck doesn't have a harware charge pin.
+    // We infer charging if voltage is > 4.15V or if USB Serial is active (data connection).
+    // Note: USB Serial is a strong indicator of power, but not necessarily "charging" if battery is full.
+    // High voltage is the best indicator of "actively charging or full".
+    
+    if (getBatteryVoltage() > 4.15) return true;
+    
+    // Check if USB CDC is connected (Host present)
+    // This happens if plugged into computer, which means it IS charging (slowly or fast)
+    if (Serial) return true;
+    
+    return false;
 }
 
 void App::drawTerminalScreen() {
@@ -264,7 +278,11 @@ void App::drawTerminalScreen() {
         if (bw > 0) display.getDisplay().fillRect(bx + 1, by + 1, bw, 7, GxEPD_BLACK);
         
         u8g2.setCursor(bx - 28, 10);
-        u8g2.print(String(bat) + "%");
+        if (isCharging()) {
+            u8g2.print("CHG");
+        } else {
+            u8g2.print(String(bat) + "%");
+        }
         
         display.getDisplay().drawFastHLine(0, 13, w, GxEPD_BLACK);
         

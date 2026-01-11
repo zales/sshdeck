@@ -46,7 +46,7 @@ bool KeyboardManager::initializeKeypad() {
     for (int retry = 0; retry < KEYBOARD_INIT_RETRIES; retry++) {
         if (keypad.begin(TCA8418_DEFAULT_ADDR, &Wire)) {
             keypad.matrix(KEY_ROWS, KEY_COLS);
-            pinMode(KEYPAD_INT, INPUT_PULLUP);
+            pinMode(BOARD_KEYBOARD_INT, INPUT_PULLUP);
             keypad.enableInterrupts();
             // Enable hardware debounce
             keypad.enableDebounce();
@@ -60,7 +60,7 @@ bool KeyboardManager::initializeKeypad() {
 }
 
 bool KeyboardManager::isKeyPressed() {
-    return (digitalRead(KEYPAD_INT) == LOW && keypad.available() > 0);
+    return (digitalRead(BOARD_KEYBOARD_INT) == LOW && keypad.available() > 0);
 }
 
 int KeyboardManager::available() {
