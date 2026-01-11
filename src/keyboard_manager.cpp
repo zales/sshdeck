@@ -34,8 +34,12 @@ bool KeyboardManager::isKeyPressed() {
     return (digitalRead(KEYPAD_INT) == LOW && keypad.available() > 0);
 }
 
+int KeyboardManager::available() {
+    return keypad.available();
+}
+
 char KeyboardManager::getKeyChar() {
-    if (!isKeyPressed()) {
+    if (!available()) {
         return 0;
     }
     

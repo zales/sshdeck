@@ -15,6 +15,7 @@ public:
     
     bool begin();
     bool isKeyPressed();
+    int available(); // Check number of events in buffer
     char getKeyChar();
     
     // Modifier states

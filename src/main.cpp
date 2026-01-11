@@ -11,21 +11,40 @@
  */
 
 #include <Arduino.h>
+#include <WiFi.h>
 #include "config.h"
 #include "utilities.h"
 #include "display_manager.h"
 #include "keyboard_manager.h"
 #include "terminal_emulator.h"
 #include "ssh_client.h"
+#include "wifi_setup.h"
+// #include "touch_manager.h"
 
 // Global managers
 DisplayManager display;
 KeyboardManager keyboard;
 TerminalEmulator terminal;
+// TouchManager touch;
 SSHClient* sshClient = nullptr;
 
 // Forward declaration
 void drawTerminalScreen();
+
+// Battery helper functions
+float getBatteryVoltage() {
+    // T-Deck Pro uses GPIO 4 for battery voltage (via divider)
+    uint32_t raw = analogRead(BOARD_BAT_ADC);
+    return (raw * 3.3 * 2.0) / 4095.0;
+}
+
+int getBatteryPercentage() {
+    float v = getBatteryVoltage();
+    // Simple linear mapping 3.3V(0%) to 4.2V(100%)
+    if (v < 3.3) return 0;
+    if (v > 4.2) return 100;
+    return (int)((v - 3.3) / (4.2 - 3.3) * 100.0);
+}
 
 /**
  * @brief Initialize all hardware and establish SSH connection
@@ -96,23 +115,76 @@ void setup() {
     }
     terminal.appendString("Keypad OK!\n");
     drawTerminalScreen();
+
+    // Initialize Touch
+    // terminal.appendString("Init Touch...\n");
+    // drawTerminalScreen();
+    // if (!touch.begin()) {
+    //     terminal.appendString("Touch FAIL (Ignored)\n");
+    // } else {
+    //     terminal.appendString("Touch OK\n");
+    //     // Touch Test Routine
+    //     terminal.appendString("=== TOUCH TEST ===\n");
+    //     terminal.appendString("CALIB FINAL...\n");
+    //     drawTerminalScreen();
+        
+    //     // Portrait Layout (240x320)
+    //     // Rect 1 (Top Left)
+    //     int r1_x = 10, r1_y = 10, r1_w = 60, r1_h = 60;
+    //     // Rect 2 (Bottom Right)
+    //     int r2_x = 170, r2_y = 250, r2_w = 60, r2_h = 60;
+        
+    //     while(1) {
+    //         int x = 0, y = 0;
+    //         bool touched = touch.getPoint(x, y);
+
+    //         if (touched) {
+               
+    //            display.setRefreshMode(true);
+    //            display.firstPage();
+    //            do {
+    //                display.clear();
+    //                display.drawText(5, 12, "Touch FINAL");
+                   
+    //                char buf[32];
+    //                snprintf(buf, 32, "X:%d  Y:%d", x, y);
+    //                display.drawText(80, 150, buf);
+                   
+    //                // Draw target rects
+    //                display.getDisplay().drawRect(r1_x, r1_y, r1_w, r1_h, GxEPD_BLACK);
+    //                display.getDisplay().drawRect(r2_x, r2_y, r2_w, r2_h, GxEPD_BLACK);
+                   
+    //                display.drawText(r1_x, r1_y+30, "TL");
+    //                display.drawText(r2_x, r2_y+30, "BR");
+                   
+    //                // Visual feedback
+    //                display.getDisplay().fillCircle(x, y, 4, GxEPD_BLACK);
+    //                // Crosshair
+    //                display.getDisplay().drawFastHLine(0, y, 240, GxEPD_BLACK);
+    //                display.getDisplay().drawFastVLine(x, 0, 320, GxEPD_BLACK);
+                   
+    //            } while(display.nextPage());
+    //         }
+            
+    //          if (keyboard.isKeyPressed()) {
+    //             if (keyboard.getKeyChar() == 27) break;
+    //         }
+    //         delay(20);
+    //     }
+    // }
+    // drawTerminalScreen();
     
-    // Create SSH client
-    sshClient = new SSHClient(terminal, keyboard);
-    
-    // Connect WiFi
-    terminal.appendString("Connecting WiFi...\n");
-    drawTerminalScreen();
-    
-    if (!sshClient->connectWiFi()) {
-        terminal.appendString("WiFi FAIL!\n");
+    // Setup WiFi (Scan or Connect)
+    WifiSetup wifiSetup(terminal, keyboard, display);
+    if (!wifiSetup.connect()) {
+        terminal.appendString("WiFi Setup Failed!\n");
         drawTerminalScreen();
-        Serial.println("WiFi connection failed!");
+        Serial.println("WiFi Setup Failed!");
         while (1) delay(1000);
     }
     
-    // WiFi success message already shown by connectWiFi
-    drawTerminalScreen();
+    // Create SSH client
+    sshClient = new SSHClient(terminal, keyboard);
     
     // Connect SSH
     terminal.appendString("Connecting SSH...\n");
@@ -163,7 +235,37 @@ void drawTerminalScreen() {
         u8g2.setFont(u8g2_font_6x10_tf);
         u8g2.setFontMode(1);
         
-        int y_start = 10;
+        // --- Status Bar ---
+        u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
+        
+        // WiFi SSID (Left)
+        u8g2.setCursor(2, 10);
+        if (WiFi.status() == WL_CONNECTED) {
+            u8g2.print(WiFi.SSID());
+        } else {
+            u8g2.print("No WiFi");
+        }
+        
+        // Host (Center) - offset to avoid overlap
+        u8g2.setCursor(100, 10);
+        if (sshClient && sshClient->isConnected()) {
+            u8g2.print(SSH_HOST);
+        } else if (WiFi.status() == WL_CONNECTED) {
+             u8g2.print("Connecting...");
+        }
+
+        // Battery (Right)
+        int bat = getBatteryPercentage();
+        String batStr = String(bat) + "%";
+        u8g2.setCursor(210, 10);
+        u8g2.print(batStr);
+        
+        // Separator line
+        display.getDisplay().drawFastHLine(0, 13, 240, GxEPD_BLACK);
+        
+        // --- Terminal Content ---
+        int y_start = 24; // Start terminal below status bar
         int line_h = 10;
         int char_w = 6;
         

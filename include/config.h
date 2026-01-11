@@ -13,7 +13,7 @@
 
 // Terminal Configuration
 #define TERM_COLS     40
-#define TERM_ROWS     32
+#define TERM_ROWS     30
 #define TERM_TYPE     "xterm-mono"
 
 // Display Configuration

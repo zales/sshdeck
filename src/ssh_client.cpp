@@ -144,31 +144,34 @@ void SSHClient::process() {
 }
 
 void SSHClient::processKeyboardInput() {
-    char c = keyboard.getKeyChar();
-    if (c == 0) return;
-    
-    // Check for SYM combinations (arrows, ESC, TAB)
-    if (keyboard.isSymActive()) {
-        char base_c = 0;
-        // Find base character from keymap
-        for (int row = 0; row < KEY_ROWS; row++) {
-            for (int col = 0; col < KEY_COLS; col++) {
-                if (keymap_lower[row][col] == c) {
-                    base_c = c;
-                    break;
+    // Process all pending key events
+    while (keyboard.available() > 0) {
+        char c = keyboard.getKeyChar();
+        if (c == 0) continue; // Skip release events or modifier-only changes
+        
+        // Check for SYM combinations (arrows, ESC, TAB)
+        if (keyboard.isSymActive()) {
+            char base_c = 0;
+            // Find base character from keymap
+            for (int row = 0; row < KEY_ROWS; row++) {
+                for (int col = 0; col < KEY_COLS; col++) {
+                    if (keymap_lower[row][col] == c) {
+                        base_c = c;
+                        break;
+                    }
                 }
+                if (base_c) break;
             }
-            if (base_c) break;
+            
+            if (base_c) {
+                handleSYMCombinations(base_c);
+                continue; // Done with this char
+            }
         }
         
-        if (base_c) {
-            handleSYMCombinations(base_c);
-            return;
-        }
+        // Regular character
+        ssh_channel_write(channel, &c, 1);
     }
-    
-    // Regular character
-    ssh_channel_write(channel, &c, 1);
 }
 
 void SSHClient::handleSYMCombinations(char base_c) {
