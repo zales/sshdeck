@@ -363,6 +363,27 @@ void App::connectToServer(const String& host, int port, const String& user, cons
     if (sshClient->connectSSH(host.c_str(), port, user.c_str(), pass.c_str(), keyData)) {
         currentState = STATE_TERMINAL;
     } else {
+            // Append instruction to terminal log
+            terminal.appendString("\n[Press any key to Exit]");
+            
+            // Ensure the last log messages are visible
+            drawTerminalScreen();
+            
+            // 1. Clear any buffered/lingering keystrokes from the selection action
+            unsigned long clearStart = millis();
+            while (millis() - clearStart < 500) { 
+                if (keyboard.isKeyPressed()) keyboard.getKeyChar();
+                delay(10);
+            }
+            
+            // 2. Wait for a NEW explicit key press
+            while(!keyboard.isKeyPressed()) {
+                delay(10);
+            }
+            keyboard.getKeyChar(); // consume key
+
+            // Optional: Don't show the "Error" popup if the log was informative enough?
+            // But keeping it for consistency.
             menu->drawMessage("Error", "SSH Failed");
     }
 }
@@ -552,14 +573,67 @@ void App::unlockSystem() {
     display.setRefreshMode(false); 
 }
 void App::handleStorage() {
+    // 1. Automatically activate USB Mode on entry
+    bool usbActive = storage.startUSBMode();
+    
+    // Set idle callback to check for host ejection
+    menu->setIdleCallback([this]() {
+        this->checkPowerButton();
+        if (storage.isEjectRequested()) {
+            storage.stopUSBMode();
+            storage.clearEjectRequest();
+             ui.drawMessage("DISCONNECTED", "Safe to remove");
+             delay(1000);
+        }
+    });
+
+    if (usbActive) {
+        ui.drawMessage("USB Active", "Connect to PC\nCopy id_rsa");
+        delay(1500); 
+    } else {
+        ui.drawMessage("Warning", "USB Init Failed");
+        delay(1000);
+    }
+
     while(true) {
         std::vector<String> items = {
-            "Import id_rsa",
+            "Scan USB Disk",
+            "Import from SD",
             "Back"
         };
-        int choice = menu->showMenu("Storage & Keys", items);
         
-        if (choice == 0) {
+        String title = storage.isUSBActive() ? "Storage (USB ON)" : "Storage (No USB)";
+        int choice = menu->showMenu(title, items);
+        
+        if (choice == 0) { // Scan USB
+             // USB mode should already be running.
+             // If not, try to start it (if it failed initially) or just scan what we have.
+             
+             ui.drawMessage("Scanning...", "Checking Disk...");
+             String key = storage.scanRAMDiskForKey();
+             
+             if (key.length() > 20 && key.startsWith("-----BEGIN")) {
+                 security.saveSSHKey(key);
+                 ui.drawMessage("Success", "Key Imported!");
+                 delay(1500);
+                 
+                 // 2. Automatically deactivate on success
+                 storage.stopUSBMode();
+                  // Reset idle callback
+                 menu->setIdleCallback([this](){ this->checkPowerButton(); });
+                 
+                 // Restart for full USB Stack reset
+                 ui.drawMessage("Restarting...", "Switching Mode");
+                 delay(1000);
+                 ESP.restart();
+
+                 return; // Exit menu
+             } else {
+                 ui.drawMessage("Failed", "Key not found.\nTry copying again.");
+                 delay(2000);
+             }
+             
+        } else if (choice == 1) { // SD Import
              String key = storage.readSSHKey("/id_rsa");
              if (key.length() > 20 && key.startsWith("-----BEGIN")) {
                  security.saveSSHKey(key);
@@ -569,7 +643,15 @@ void App::handleStorage() {
                  ui.drawMessage("Error", "Invalid/Missing Key");
                  delay(1000);
              }
-        } else {
+        } else { // Back
+            // 3. Deactivate on exit
+            if (usbActive) {
+                storage.stopUSBMode();
+                ui.drawMessage("Restarting...", "Switching Mode");
+                delay(1000);
+                ESP.restart();
+            }
+            menu->setIdleCallback([this](){ this->checkPowerButton(); });
             return;
         }
     }

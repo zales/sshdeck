@@ -15,9 +15,18 @@ public:
     // returns true if started, false if failed/stopped
     bool startUSBMode();
     void stopUSBMode();
+    
+    // Check/Clear external eject requests (from Host OS)
+    bool isEjectRequested();
+    void clearEjectRequest();
+
+    // Scan the internal RAM disk for key data
+    String scanRAMDiskForKey();
 
     // Key Management
     String readSSHKey(const String& filename = "/id_rsa");
+
+    bool isUSBActive();
     
 private:
     bool isMounted;

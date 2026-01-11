@@ -63,11 +63,45 @@ bool SSHClient::connectSSH(const char* host, int port, const char* user, const c
         
         const char* keyToUse = hasKey ? keyData : SSH_KEY_DATA;
         
-        if (ssh_pki_import_privkey_base64(keyToUse, nullptr, nullptr, nullptr, &privkey) == SSH_OK) {
-            rc = ssh_userauth_publickey(session, nullptr, privkey);
-            ssh_key_free(privkey);
+        // Debug: Print key info (safely)
+        String keyLenMsg = "Key Len: " + String(strlen(keyToUse)) + "\n";
+        terminal.appendString(keyLenMsg.c_str());
+
+        // Check header format
+        if (strstr(keyToUse, "OPENSSH PRIVATE KEY")) {
+             terminal.appendString("ERR: OPENSSH FORMAT DETECTED!\n");
+             terminal.appendString("This firmware needs PEM (RSA)\n");
+             terminal.appendString("Convert key on PC:\n");
+             terminal.appendString("ssh-keygen -p -m PEM -f id_rsa\n");
+             rc = SSH_AUTH_DENIED; 
         } else {
-            terminal.appendString("Key import failed!\n");
+            // Check for valid PEM header/footer
+            if (!strstr(keyToUse, "-----BEGIN RSA PRIVATE KEY-----")) {
+                 terminal.appendString("ERR: Missing RSA Start Header\n");
+                 terminal.appendString("First 20 chars:\n");
+                 char snippet[21];
+                 strncpy(snippet, keyToUse, 20); snippet[20] = 0;
+                 terminal.appendString(snippet);
+                 terminal.appendString("\n");
+            }
+
+            int importRc = ssh_pki_import_privkey_base64(keyToUse, nullptr, nullptr, nullptr, &privkey);
+            if (importRc == SSH_OK) {
+                terminal.appendString("Key Import OK. Auth...\n");
+                rc = ssh_userauth_publickey(session, nullptr, privkey);
+                ssh_key_free(privkey);
+                
+                if (rc != SSH_AUTH_SUCCESS) {
+                    terminal.appendString("Pubkey Auth Failed: ");
+                    terminal.appendString(ssh_get_error(session));
+                    terminal.appendString("\nCheck server authorized_keys\n");
+                }
+            } else {
+                terminal.appendString("Key Import Failed!\n");
+                terminal.appendString("Code: ");
+                terminal.appendString(String(importRc).c_str());
+                terminal.appendString("\n");
+            }
         }
     }
 
