@@ -61,5 +61,9 @@ private:
     void handleSettings();
     void handleChangePin();
     void handleStorage();
+    void exitStorageMode(); // Helper for clean exit/restart
     void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name);
 };
+
+    // Helper for Storage Exit
+    void exitStorageMode();

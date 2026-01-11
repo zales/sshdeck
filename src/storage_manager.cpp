@@ -149,7 +149,7 @@ bool StorageManager::startUSBMode() {
         return true;
     }
 
-    MSC.vendorID("SshDisk");
+    MSC.vendorID("SshDeck");
     MSC.productID("Key Disk");
     MSC.productRevision("1.0");
     MSC.onRead(onRead);

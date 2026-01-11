@@ -35,7 +35,7 @@ void App::initializeHardware() {
         Serial.begin(DEBUG_SERIAL_BAUD);
         delay(100);
         Serial.println("\n\n=================================");
-        Serial.println("T-Deck Pro SSH Terminal (Refactored)");
+        Serial.println("SshDeck SSH Terminal");
         Serial.println("=================================\n");
     }
 
@@ -72,7 +72,7 @@ void App::initializeHardware() {
     }
     
     // Welcome Screen
-    ui.drawBootScreen("T-Deck Pro", "Initializing...");
+    ui.drawBootScreen("SshDeck", "Initializing...");
     
     // terminal.appendString("Init System...\n");
     // drawTerminalScreen();
@@ -580,10 +580,10 @@ void App::handleStorage() {
     menu->setIdleCallback([this]() {
         this->checkPowerButton();
         if (storage.isEjectRequested()) {
-            storage.stopUSBMode();
             storage.clearEjectRequest();
              ui.drawMessage("DISCONNECTED", "Safe to remove");
              delay(1000);
+             exitStorageMode();
         }
     });
 
@@ -617,17 +617,8 @@ void App::handleStorage() {
                  ui.drawMessage("Success", "Key Imported!");
                  delay(1500);
                  
-                 // 2. Automatically deactivate on success
-                 storage.stopUSBMode();
-                  // Reset idle callback
-                 menu->setIdleCallback([this](){ this->checkPowerButton(); });
-                 
-                 // Restart for full USB Stack reset
-                 ui.drawMessage("Restarting...", "Switching Mode");
-                 delay(1000);
-                 ESP.restart();
-
-                 return; // Exit menu
+                 exitStorageMode();
+                 return; // Exit menu/Restart
              } else {
                  ui.drawMessage("Failed", "Key not found.\nTry copying again.");
                  delay(2000);
@@ -646,13 +637,21 @@ void App::handleStorage() {
         } else { // Back
             // 3. Deactivate on exit
             if (usbActive) {
-                storage.stopUSBMode();
-                ui.drawMessage("Restarting...", "Switching Mode");
-                delay(1000);
-                ESP.restart();
+                exitStorageMode();
             }
             menu->setIdleCallback([this](){ this->checkPowerButton(); });
             return;
         }
     }
+}
+
+void App::exitStorageMode() {
+    storage.stopUSBMode();
+    // Reset idle callback
+    if (menu) menu->setIdleCallback([this](){ this->checkPowerButton(); });
+    
+    // Restart for full USB Stack reset
+    ui.drawMessage("Restarting...", "Switching Mode");
+    delay(1000);
+    ESP.restart();
 }
