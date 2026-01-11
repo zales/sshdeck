@@ -6,7 +6,11 @@
 extern void drawTerminalScreen();
 
 WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp)
-    : terminal(term), keyboard(kb), display(disp) {
+    : terminal(term), keyboard(kb), display(disp), security(nullptr) {
+}
+
+void WifiManager::setSecurityManager(SecurityManager* sec) {
+    security = sec;
 }
 
 void WifiManager::setIdleCallback(std::function<void()> cb) {
@@ -22,7 +26,19 @@ void WifiManager::loadCredentials() {
     
     for (int i=0; i<maxSavedIndex; i++) {
         String s = preferences.getString(("ssid" + String(i)).c_str(), "");
-        String p = preferences.getString(("pass" + String(i)).c_str(), "");
+        String rawPass = preferences.getString(("pass" + String(i)).c_str(), "");
+        String p = rawPass;
+        
+        if (security && !rawPass.isEmpty()) {
+            String decrypted = security->decrypt(rawPass);
+            // If decrypt fail but raw not empty -> assume legacy plaintext
+            if (decrypted.isEmpty() && !rawPass.isEmpty()) {
+                p = rawPass;
+            } else {
+                p = decrypted;
+            }
+        }
+        
         savedNetworks[i].ssid = s;
         savedNetworks[i].pass = p;
     }
@@ -46,14 +62,18 @@ void WifiManager::saveCredentials(const String& ssid, const String& pass) {
     if (existingIndex != -1) {
         // Update password
         savedNetworks[existingIndex].pass = pass;
-        preferences.putString(("pass" + String(existingIndex)).c_str(), pass);
+        String storePass = security ? security->encrypt(pass) : pass;
+        preferences.putString(("pass" + String(existingIndex)).c_str(), storePass.c_str());
     } else {
         // Add new
         if (maxSavedIndex < MAX_SAVED_NETWORKS) {
             savedNetworks[maxSavedIndex].ssid = ssid;
             savedNetworks[maxSavedIndex].pass = pass;
             preferences.putString(("ssid" + String(maxSavedIndex)).c_str(), ssid);
-            preferences.putString(("pass" + String(maxSavedIndex)).c_str(), pass);
+            
+            String storePass = security ? security->encrypt(pass) : pass;
+            preferences.putString(("pass" + String(maxSavedIndex)).c_str(), storePass.c_str());
+            
             maxSavedIndex++;
             preferences.putInt("count", maxSavedIndex);
         } else {
@@ -62,8 +82,22 @@ void WifiManager::saveCredentials(const String& ssid, const String& pass) {
              savedNetworks[idx].ssid = ssid;
              savedNetworks[idx].pass = pass;
              preferences.putString(("ssid" + String(idx)).c_str(), ssid);
-             preferences.putString(("pass" + String(idx)).c_str(), pass);
+             
+             String storePass = security ? security->encrypt(pass) : pass;
+             preferences.putString(("pass" + String(idx)).c_str(), storePass.c_str());
         }
+    }
+    preferences.end();
+}
+
+void WifiManager::reEncryptAll() {
+    // Assumes savedNetworks[] is populated with plaintext (decrypted on load)
+    // and that SecurityManager has the NEW key set.
+    preferences.begin("tdeck-wifi", false);
+    for(int i=0; i<maxSavedIndex; i++) {
+         String p = savedNetworks[i].pass;
+         String storePass = security ? security->encrypt(p) : p;
+         preferences.putString(("pass" + String(i)).c_str(), storePass.c_str());
     }
     preferences.end();
 }

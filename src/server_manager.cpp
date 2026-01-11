@@ -1,6 +1,10 @@
 #include "server_manager.h"
 
-ServerManager::ServerManager() {
+ServerManager::ServerManager() : security(nullptr) {
+}
+
+void ServerManager::setSecurityManager(SecurityManager* sec) {
+    security = sec;
 }
 
 void ServerManager::begin() {
@@ -20,7 +24,19 @@ void ServerManager::load() {
         s.host = prefs.getString((prefix + "host").c_str(), "");
         s.port = prefs.getInt((prefix + "port").c_str(), 22);
         s.user = prefs.getString((prefix + "user").c_str(), "root");
-        s.password = prefs.getString((prefix + "pass").c_str(), "");
+        
+        String rawPass = prefs.getString((prefix + "pass").c_str(), "");
+        if (security && !rawPass.isEmpty()) {
+            String decrypted = security->decrypt(rawPass);
+            // If decryption fails (returns empty) but raw wasn't empty, assume legacy plaintext
+            if (decrypted.isEmpty() && !rawPass.isEmpty()) {
+                s.password = rawPass;
+            } else {
+                s.password = decrypted;
+            }
+        } else {
+            s.password = rawPass;
+        }
         
         if (s.host.length() > 0) {
             servers.push_back(s);
@@ -42,7 +58,12 @@ void ServerManager::saveServerToPrefs(int index, const ServerConfig& config) {
     prefs.putString((prefix + "host").c_str(), config.host);
     prefs.putInt((prefix + "port").c_str(), config.port);
     prefs.putString((prefix + "user").c_str(), config.user);
-    prefs.putString((prefix + "pass").c_str(), config.password);
+    
+    if (security) {
+        prefs.putString((prefix + "pass").c_str(), security->encrypt(config.password));
+    } else {
+        prefs.putString((prefix + "pass").c_str(), config.password);
+    }
 }
 
 void ServerManager::addServer(const ServerConfig& config) {

@@ -7,15 +7,20 @@
 #define PIN_BOOT_BUTTON 0
 
 App::App() 
-    : wifi(terminal, keyboard, display), menu(nullptr), sshClient(nullptr), currentState(STATE_MENU), pwrBtnStart(0) {
+    : wifi(terminal, keyboard, display), ui(display), menu(nullptr), sshClient(nullptr), currentState(STATE_MENU), pwrBtnStart(0) {
 }
 
 void App::setup() {
     initializeHardware();
+    
+    security.begin();
+    unlockSystem();
 
     // Setup WiFi (Scan or Connect)
+    wifi.setSecurityManager(&security);
     wifi.connect(); 
     
+    serverManager.setSecurityManager(&security);
     serverManager.begin();
     menu = new MenuSystem(display, keyboard);
     // Bind member function via lambda
@@ -67,25 +72,17 @@ void App::initializeHardware() {
     }
     
     // Welcome Screen
-    display.setRefreshMode(false);
-    display.firstPage();
-    do {
-        display.clear();
-        display.drawText(10, 20, "T-Deck Pro SSH Terminal");
-        display.drawText(10, 40, "Initializing System...");
-    } while (display.nextPage());
+    ui.drawBootScreen("T-Deck Pro", "Initializing...");
     
-    terminal.appendString("Init System...\n");
-    drawTerminalScreen();
+    // terminal.appendString("Init System...\n");
+    // drawTerminalScreen();
     
     if (!keyboard.begin()) {
-        terminal.appendString("Keyboard FAIL!\n");
-        drawTerminalScreen();
+        ui.updateBootStatus("Keyboard FAIL!");
         Serial.println("Keyboard init failed!");
         while (1) delay(1000);
     }
-    terminal.appendString("Keyboard OK!\n");
-    drawTerminalScreen();
+    ui.updateBootStatus("Keyboard OK");
 }
 
 void App::loop() {
@@ -103,7 +100,7 @@ void App::loop() {
             }
             if (!sshClient->isConnected()) {
                 currentState = STATE_MENU;
-                menu->drawMessage("Disconnected", "Session Ended");
+                ui.drawMessage("Disconnected", "Session Ended");
             }
         } else {
             currentState = STATE_MENU;
@@ -148,28 +145,7 @@ void App::checkPowerButton() {
 void App::enterDeepSleep() {
     Serial.println("Shutting down...");
     
-    display.setRefreshMode(false);
-    display.firstPage();
-    do {
-        display.clear();
-        U8G2_FOR_ADAFRUIT_GFX& u8g2 = display.getFonts();
-        
-        display.fillRect(0, 0, 320, 240, GxEPD_WHITE);
-        display.fillRect(0, 80, 240, 80, GxEPD_BLACK);
-        
-        u8g2.setForegroundColor(GxEPD_WHITE);
-        u8g2.setBackgroundColor(GxEPD_BLACK);
-        u8g2.setFont(u8g2_font_logisoso42_tr);
-        u8g2.setCursor(30, 140);
-        u8g2.print("SshDeck");
-        
-        u8g2.setForegroundColor(GxEPD_BLACK);
-        u8g2.setBackgroundColor(GxEPD_WHITE);
-        u8g2.setFont(u8g2_font_helvB10_tr);
-        u8g2.setCursor(65, 200);
-        u8g2.print("System Halted");
-
-    } while (display.nextPage());
+    ui.drawShutdownScreen();
 
     delay(1000);
 
@@ -456,56 +432,104 @@ void App::handleQuickConnect() {
 void App::handleSettings() {
     while(true) {
         std::vector<String> items = {
+            "Change PIN",
             "WiFi Network",
-            "System Info"
+            "System Info",
+            "Back"
         };
         int choice = menu->showMenu("Settings", items);
-        if (choice < 0) return;
         
         if (choice == 0) {
-            wifi.setIdleCallback([this]() { this->checkPowerButton(); });
-            wifi.manage();
-        } else if (choice == 1) {
+            handleChangePin();
+        } 
+        else if (choice == 1) {
+             wifi.setIdleCallback([this]() { this->checkPowerButton(); });
+             wifi.manage();
+        } 
+        else if (choice == 2) {
             String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Disconnected";
             String bat = String(getBatteryPercentage()) + "% (" + String(getBatteryVoltage()) + "V)";
             String ram = String(ESP.getFreeHeap() / 1024) + " KB";
             
-            display.setRefreshMode(false);
-            display.firstPage();
-            do {
-                display.clear();
-                U8G2_FOR_ADAFRUIT_GFX& u8g2 = display.getFonts();
-                
-                display.fillRect(0, 0, display.getWidth(), 24, GxEPD_BLACK);
-                u8g2.setForegroundColor(GxEPD_WHITE);
-                u8g2.setBackgroundColor(GxEPD_BLACK);
-                u8g2.setFont(u8g2_font_helvB12_tr);
-                u8g2.setCursor(5, 18);
-                u8g2.print("System Info");
-                
-                u8g2.setForegroundColor(GxEPD_BLACK);
-                u8g2.setBackgroundColor(GxEPD_WHITE);
-                u8g2.setFont(u8g2_font_helvR10_tr);
-                
-                int y = 50;
-                u8g2.setCursor(10, y); u8g2.print("IP:  " + ip); y+=25;
-                u8g2.setCursor(10, y); u8g2.print("BAT: " + bat); y+=25;
-                u8g2.setCursor(10, y); u8g2.print("RAM: " + ram); y+=25;
-                u8g2.setCursor(10, y); u8g2.print("MAC: " + WiFi.macAddress()); y+=25;
-                
-                int h = display.getHeight();
-                int w = display.getWidth();
-                display.fillRect(0, h - 16, w, 16, GxEPD_BLACK);
-                u8g2.setForegroundColor(GxEPD_WHITE);
-                u8g2.setBackgroundColor(GxEPD_BLACK);
-                u8g2.setFont(u8g2_font_profont12_tr); 
-                u8g2.setCursor(5, h - 4);
-                u8g2.print("Press Key to Close");
-                
-            } while (display.nextPage());
+            ui.drawSystemInfo(ip, bat, ram, WiFi.macAddress());
             
             while(!keyboard.isKeyPressed()) delay(10);
             keyboard.getKeyChar();
         }
+        else {
+            return;
+        }
     }
+}
+
+void App::handleChangePin() {
+    String newPin = "";
+    
+    // 1. Enter New PIN
+    while (true) {
+        ui.drawPinEntry("CHANGE PIN", "Enter New PIN:", newPin);
+        while(!keyboard.available()) { delay(10); checkPowerButton(); }
+        char key = keyboard.getKeyChar();
+        if (key == '\n' || key == '\r') { if (newPin.length() > 0) break; }
+        else if (key == 0x08) { if (newPin.length() > 0) newPin.remove(newPin.length()-1); }
+        else if (key >= 32 && key <= 126) newPin += key;
+    }
+    
+    // 2. Confirm
+    String confirmPin = "";
+    while (true) {
+        ui.drawPinEntry("CHANGE PIN", "Confirm New PIN:", confirmPin);
+        while(!keyboard.available()) { delay(10); checkPowerButton(); }
+        char key = keyboard.getKeyChar();
+        if (key == '\n' || key == '\r') { if (confirmPin.length() > 0) break; }
+        else if (key == 0x08) { if (confirmPin.length() > 0) confirmPin.remove(confirmPin.length()-1); }
+        else if (key >= 32 && key <= 126) confirmPin += key;
+    }
+    
+    if (newPin != confirmPin) {
+        ui.drawMessage("Error", "PIN Mismatch");
+        return;
+    }
+    
+    // 3. Re-Encrypt
+    ui.drawMessage("Processing", "Re-encrypting data...");
+    security.changePin(newPin);
+    serverManager.reEncryptAll();
+    wifi.reEncryptAll();
+    ui.drawMessage("Success", "PIN Changed!");
+}
+
+void App::unlockSystem() {
+    String pin = "";
+    display.setRefreshMode(true); 
+
+    ui.drawPinEntry("SECURE BOOT", "Enter PIN:", "", false);
+
+    while (true) {
+        char key = keyboard.getKeyChar();
+        if (key > 0) {
+            bool changed = false;
+            bool enter = false;
+            if (key == '\n' || key == '\r') { if (pin.length() > 0) enter = true; } 
+            else if (key == 0x08) { if (pin.length() > 0) { pin.remove(pin.length() - 1); changed = true; } } 
+            else if (key >= 32 && key <= 126) { pin += key; changed = true; }
+            
+            if (enter) {
+                 ui.drawMessage("Verifying", "Please wait...");
+                 if (security.authenticate(pin)) break; 
+                 else { 
+                    pin = ""; 
+                    ui.drawPinEntry("ACCESS DENIED", "Try Again:", "", true); 
+                    delay(500); 
+                 }
+            } else if (changed) {
+                 ui.drawPinEntry("SECURE BOOT", "Enter PIN:", pin, false);
+            }
+        }
+        delay(10);
+    }
+    
+    ui.drawMessage("UNLOCKED", "System Ready");
+    delay(1000); 
+    display.setRefreshMode(false); 
 }

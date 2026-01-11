@@ -9,7 +9,9 @@
 #include "ssh_client.h"
 #include "server_manager.h"
 #include "ui/menu_system.h"
+#include "ui/ui_manager.h"
 #include "wifi_manager.h"
+#include "security_manager.h"
 
 enum AppState {
     STATE_MENU,
@@ -26,11 +28,13 @@ private:
     // Subsystems
     DisplayManager display;
     KeyboardManager keyboard;
+    UIManager ui;
     TerminalEmulator terminal;
     ServerManager serverManager;
     WifiManager wifi;
     MenuSystem* menu;
     SSHClient* sshClient;
+    SecurityManager security;
 
     // State
     AppState currentState;
@@ -42,6 +46,7 @@ private:
     void checkPowerButton();
     float getBatteryVoltage();
     int getBatteryPercentage();
+    void unlockSystem();
 
     // UI & Logic
     void drawTerminalScreen();
@@ -52,5 +57,6 @@ private:
     void handleSavedServers();
     void handleQuickConnect();
     void handleSettings();
+    void handleChangePin();
     void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name);
 };

@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Preferences.h>
+#include "security_manager.h"
 #include "terminal_emulator.h"
 #include "keyboard_manager.h"
 #include "display_manager.h"
@@ -12,6 +13,8 @@ class WifiManager {
 public:
     WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp);
     
+    void setSecurityManager(SecurityManager* sec);
+    
     void setIdleCallback(std::function<void()> cb);
 
     // Attempt to connect using saved credentials or user selection
@@ -20,6 +23,7 @@ public:
     
     // Manage saved networks (List, Edit, Delete)
     void manage();
+    void reEncryptAll();
 
 private:
     void deleteCredential(int index);
@@ -29,6 +33,7 @@ std::function<void()> idleCallback;
     KeyboardManager& keyboard;
     DisplayManager& display;
     Preferences preferences;
+    SecurityManager* security;
     
     struct WifiCreds {
         String ssid;
@@ -41,8 +46,11 @@ std::function<void()> idleCallback;
     int lastUsedIndex = -1;
     int maxSavedIndex = 0;
     
-    void loadCredentials();
+    // Made public for App::changePin
+    void loadCredentials(); 
     void saveCredentials(const String& ssid, const String& pass);
+    
+
     bool tryConnect(const String& ssid, const String& pass);
     void scanAndSelect();
     String readInput(bool passwordMask = false);
