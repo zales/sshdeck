@@ -6,6 +6,7 @@
 .vscode/launch.json
 .vscode/ipch
 .ccls-cache/
+.vscode
 
 # Build artifacts
 *.o

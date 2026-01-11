@@ -6,8 +6,6 @@
 #include "terminal_emulator.h"
 #include "keyboard_manager.h"
 #include "display_manager.h"
-// #include "touch_manager.h"
-
 #include <functional>
 
 class WifiManager {
