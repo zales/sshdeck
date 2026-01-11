@@ -41,6 +41,10 @@ bool SSHClient::connectSSH(const char* host, int port, const char* user, const c
     int verbosity = SSH_LOG_NOLOG;
     ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
     
+    // Set 10s connection timeout (default is usually too long)
+    long timeout = 10; 
+    ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout);
+    
     // Connect
     if (ssh_connect(session) != SSH_OK) {
         terminal.appendString("SSH connect failed!\n");

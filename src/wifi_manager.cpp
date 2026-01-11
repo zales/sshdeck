@@ -2,8 +2,7 @@
 #include "ui/menu_system.h" 
 #include <vector>
 #include <functional>
-
-extern void drawTerminalScreen();
+#include <algorithm> // For std::sort
 
 WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp)
     : terminal(term), keyboard(kb), display(disp), security(nullptr) {
@@ -15,6 +14,10 @@ void WifiManager::setSecurityManager(SecurityManager* sec) {
 
 void WifiManager::setIdleCallback(std::function<void()> cb) {
     idleCallback = cb;
+}
+
+void WifiManager::setRenderCallback(std::function<void()> cb) {
+    renderCallback = cb;
 }
 
 void WifiManager::loadCredentials() {
@@ -103,7 +106,7 @@ void WifiManager::reEncryptAll() {
 }
 
 void WifiManager::refreshScreen() {
-    drawTerminalScreen();
+    if (renderCallback) renderCallback();
 }
 
 // Helper to enter text using the MenuSystem's UI style

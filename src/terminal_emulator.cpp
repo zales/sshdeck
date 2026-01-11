@@ -13,6 +13,8 @@ TerminalEmulator::TerminalEmulator()
 
     // Initialize attributes for both buffers
     for (int i = 0; i < TERM_ROWS; i++) {
+        memset(lines_primary[i], 0, TERM_COLS + 1);
+        memset(lines_alt[i], 0, TERM_COLS + 1);
         for (int j = 0; j < TERM_COLS; j++) {
             attrs_primary[i][j].inverse = false;
             attrs_alt[i][j].inverse = false;
@@ -56,23 +58,22 @@ void TerminalEmulator::appendChar(char c) {
     if (c == 0x08) {  // Backspace
         if (cursor_x > 0) {
             cursor_x--;
-            // Do not delete character, just move cursor
         }
         return;
     }
 
     if (c == '\t') { // Tab
-        // Move to next multiple of 8
         int next_tab = (cursor_x / 8 + 1) * 8;
         if (next_tab >= TERM_COLS) next_tab = TERM_COLS - 1;
         
-        // Fill properly with spaces
         while (cursor_x < next_tab) {
-             // Pad if needed
-             while (term_lines[cursor_y].length() <= cursor_x) {
-                 term_lines[cursor_y] += ' ';
+             // Pad gap with spaces
+             int len = strlen(term_lines[cursor_y]);
+             if (cursor_x >= len) {
+                 term_lines[cursor_y][cursor_x] = ' ';
+                 term_lines[cursor_y][cursor_x + 1] = '\0';
              }
-             term_attrs[cursor_y][cursor_x] = {false};
+             term_attrs[cursor_y][cursor_x] = {current_inverse};
              cursor_x++;
         }
         need_display_update = true;
@@ -82,44 +83,29 @@ void TerminalEmulator::appendChar(char c) {
     // Printable character
     if (c >= 32 && c < 127) {
         char display_char = c;
-        
-        // Handle DEC Line Drawing mapping
         if (use_line_drawing) {
-            // Map common line drawing chars to ASCII equivalents (poor man's graphics)
-            switch (c) {
-                case 'j': display_char = '+'; break; // Bottom Right -> +
-                case 'k': display_char = '+'; break; // Top Right -> +
-                case 'l': display_char = '+'; break; // Top Left -> +
-                case 'm': display_char = '+'; break; // Bottom Left -> +
-                case 'n': display_char = '+'; break; // Crossing -> +
-                case 'q': display_char = '-'; break; // Horizontal -> -
-                case 'x': display_char = '|'; break; // Vertical -> |
-                case 't': display_char = '+'; break; // Left T -> +
-                case 'u': display_char = '+'; break; // Right T -> +
-                case 'v': display_char = '+'; break; // Bottom T -> +
-                case 'w': display_char = '+'; break; // Top T -> +
-                case 'a': display_char = '#'; break; // Board -> #
-                case '`': display_char = '+'; break; // Diamond -> +
-                case '0': display_char = '#'; break; // Block
-                case '.': display_char = 'v'; break; // Down Arrow
-                case ',': display_char = '<'; break; // Left Arrow
-                case '+': display_char = '>'; break; // Right Arrow
-                case '-': display_char = '^'; break; // Up Arrow
-                case 'h': display_char = '#'; break; // Board
-                case '~': display_char = '*'; break; // Bullet
-            }
+             // Simple fallback map
+             if (c >= 'j' && c <= 'm') display_char = '+'; 
+             else if (c == 'q') display_char = '-';
+             else if (c == 'x') display_char = '|';
+             else if (c == '`') display_char = '+'; 
+             else if (c == 'a') display_char = '#';
         }
 
-        // Pad line with spaces if cursor is beyond current length
-        while (term_lines[cursor_y].length() < cursor_x) {
-            term_lines[cursor_y] += ' ';
-            term_attrs[cursor_y][term_lines[cursor_y].length()-1] = {false};
+        // Check if we are writing past end of current string in buffer
+        // Note: term_lines[y] is zero-init, so strlen works.
+        int len = strlen(term_lines[cursor_y]);
+        
+        // Pad with spaces if jumping (remote possibility in cursor move)
+        while (len < cursor_x) {
+             term_lines[cursor_y][len] = ' ';
+             term_lines[cursor_y][len+1] = '\0';
+             len++;
         }
 
-        if (cursor_x >= term_lines[cursor_y].length()) {
-            term_lines[cursor_y] += display_char;
-        } else {
-            term_lines[cursor_y].setCharAt(cursor_x, display_char);
+        term_lines[cursor_y][cursor_x] = display_char;
+        if (cursor_x == len) {
+            term_lines[cursor_y][cursor_x + 1] = '\0';
         }
         
         term_attrs[cursor_y][cursor_x].inverse = current_inverse;
@@ -148,7 +134,7 @@ void TerminalEmulator::appendString(const char* str) {
 
 void TerminalEmulator::clear() {
     for (int i = 0; i < TERM_ROWS; i++) {
-        term_lines[i] = "";
+        term_lines[i][0] = '\0';
         for (int j = 0; j < TERM_COLS; j++) {
             term_attrs[i][j].inverse = false;
         }
@@ -158,7 +144,7 @@ void TerminalEmulator::clear() {
     need_display_update = true;
 }
 
-const String& TerminalEmulator::getLine(int row) const {
+const char* TerminalEmulator::getLine(int row) const {
     return term_lines[row];
 }
 
@@ -433,11 +419,11 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                 
                 if (cursor_y <= bottom && cursor_y >= scrollTop) {
                      for (int i = bottom; i >= cursor_y + n; i--) {
-                         term_lines[i] = term_lines[i - n];
+                         memcpy(term_lines[i], term_lines[i - n], TERM_COLS + 1);
                          for(int j=0; j<TERM_COLS; j++) term_attrs[i][j] = term_attrs[i-n][j];
                      }
                      for (int i = cursor_y; i < cursor_y + n && i <= bottom; i++) {
-                         term_lines[i] = "";
+                         term_lines[i][0] = '\0';
                          for(int j=0; j<TERM_COLS; j++) term_attrs[i][j] = {false};
                      }
                 }
@@ -451,11 +437,11 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                 int bottom = scrollBottom;
                 if (cursor_y <= bottom && cursor_y >= scrollTop) {
                      for (int i = cursor_y; i <= bottom - n; i++) {
-                         term_lines[i] = term_lines[i + n];
+                         memcpy(term_lines[i], term_lines[i + n], TERM_COLS + 1);
                          for(int j=0; j<TERM_COLS; j++) term_attrs[i][j] = term_attrs[i+n][j];
                      }
                      for (int i = bottom - n + 1; i <= bottom; i++) {
-                         term_lines[i] = "";
+                         term_lines[i][0] = '\0';
                          for (int j = 0; j < TERM_COLS; j++) term_attrs[i][j] = {false};
                      }
                 }
@@ -463,19 +449,50 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
             }
             break;
             
+
         case '@': // Insert Character
             {
                 int n = GET_PARAM(0, 1);
-                String& line = term_lines[cursor_y];
-                // Pad line to cursor if short
-                while (line.length() < cursor_x) line += ' ';
+                char* line = term_lines[cursor_y];
+                int len = strlen(line);
                 
-                String spaces = "";
-                for(int i=0; i<n; i++) spaces += ' ';
+                // If cursor is past current length, pad with spaces first
+                while (len < cursor_x) {
+                    if (len >= TERM_COLS) break;
+                    line[len] = ' ';
+                    len++;
+                }
+                line[len] = '\0';
                 
-                line = line.substring(0, cursor_x) + spaces + line.substring(cursor_x);
-                if (line.length() > TERM_COLS) line = line.substring(0, TERM_COLS);
+                // Calculate how many chars we can actually shift
+                // If we insert n chars at cursor_x, chars from cursor_x to the end
+                // move to cursor_x + n.
+                // Any chars that fall off TERM_COLS are lost.
                 
+                if (cursor_x < TERM_COLS) {
+                    int chars_to_move = len - cursor_x; 
+                    // limit chars_to_move so we don't write past end
+                    if (cursor_x + n + chars_to_move > TERM_COLS) {
+                        chars_to_move = TERM_COLS - (cursor_x + n);
+                    }
+                    
+                    if (chars_to_move > 0) {
+                        memmove(&line[cursor_x + n], &line[cursor_x], chars_to_move);
+                    }
+                    
+                    // Fill the gap with spaces
+                    for (int i = 0; i < n; i++) {
+                        if (cursor_x + i < TERM_COLS) {
+                            line[cursor_x + i] = ' ';
+                        }
+                    }
+                    
+                    // Ensure null termination at potentially new length
+                    int new_len = len + n;
+                    if (new_len > TERM_COLS) new_len = TERM_COLS;
+                    line[new_len] = '\0';
+                }
+
                 // Shift attributes
                 for (int j = TERM_COLS - 1; j >= cursor_x + n; j--) {
                     term_attrs[cursor_y][j] = term_attrs[cursor_y][j - n];
@@ -490,9 +507,18 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'P': // Delete Character
              {
                 int n = GET_PARAM(0, 1);
-                String& line = term_lines[cursor_y];
-                if (cursor_x < line.length()) {
-                    line.remove(cursor_x, n);
+                char* line = term_lines[cursor_y];
+                int len = strlen(line);
+                
+                if (cursor_x < len) {
+                    int remaining = len - cursor_x;
+                    if (n > remaining) n = remaining;
+                    
+                    // Shift left
+                    memmove(&line[cursor_x], &line[cursor_x + n], remaining - n);
+                    
+                    // Terminate the new shorter string
+                    line[len - n] = '\0';
                 }
                 
                 // Shift attributes
@@ -509,11 +535,19 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'X': // Erase Character
              {
                  int n = GET_PARAM(0, 1);
-                 String& line = term_lines[cursor_y];
+                 char* line = term_lines[cursor_y];
+                 int len = strlen(line);
+                 
                  // Extend line if needed
-                 while(line.length() < cursor_x + n) line += ' ';
+                 while (len < cursor_x + n) {
+                     if (len >= TERM_COLS) break;
+                     line[len] = ' ';
+                     len++;
+                 }
+                 line[len] = '\0';
+                 
                  for(int i=0; i<n; i++) {
-                     if (cursor_x + i < line.length()) line.setCharAt(cursor_x + i, ' ');
+                     if (cursor_x + i < len) line[cursor_x + i] = ' ';
                      if (cursor_x + i < TERM_COLS) term_attrs[cursor_y][cursor_x + i] = {false};
                  }
                  need_display_update = true;
@@ -525,27 +559,42 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                 int mode = GET_PARAM(0, 0);
                 if (mode == 0) {
                     // Clear from cursor to end
-                    if (cursor_x < term_lines[cursor_y].length())
-                        term_lines[cursor_y] = term_lines[cursor_y].substring(0, cursor_x);
-                    else if (cursor_x == 0)
-                         term_lines[cursor_y] = "";
+                    char* line = term_lines[cursor_y];
+                    int len = strlen(line);
+                    
+                    if (cursor_x < len) {
+                        line[cursor_x] = '\0';
+                    } else if (cursor_x == 0) {
+                        line[0] = '\0';
+                    }
                      
                     for (int j = cursor_x; j < TERM_COLS; j++) term_attrs[cursor_y][j] = {false};
                     
                     for (int i = cursor_y + 1; i < TERM_ROWS; i++) {
-                        term_lines[i] = "";
+                        term_lines[i][0] = '\0';
                         for(int j=0; j<TERM_COLS; j++) term_attrs[i][j] = {false};
                     }
                 } else if (mode == 1) {
                     // Start of screen to cursor
                     for (int i = 0; i < cursor_y; i++) {
-                         term_lines[i] = "";
+                         term_lines[i][0] = '\0';
                          for(int j=0; j<TERM_COLS; j++) term_attrs[i][j]={false};
                     }
-                    String& line = term_lines[cursor_y];
-                     while (line.length() <= cursor_x) line += ' ';
-                     for(int i=0; i<=cursor_x; i++) line.setCharAt(i, ' ');
-                     for (int j = 0; j <= cursor_x; j++) term_attrs[cursor_y][j] = {false};
+                    
+                    char* line = term_lines[cursor_y];
+                    int len = strlen(line);
+                    // Ensure padding up to cursor
+                    while (len <= cursor_x) {
+                        if (len >= TERM_COLS) break;
+                        line[len] = ' ';
+                        len++;
+                    }
+                    line[len] = '\0';
+                    
+                    for(int i=0; i<=cursor_x; i++) {
+                        if(i < TERM_COLS) line[i] = ' ';
+                    }
+                    for (int j = 0; j <= cursor_x; j++) term_attrs[cursor_y][j] = {false};
                 } else if (mode == 2) {
                     clear();
                 }
@@ -558,20 +607,34 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                 int mode = GET_PARAM(0, 0);
                 if (mode == 0) {
                     // Clear from cursor to end of line
-                    if (cursor_x < term_lines[cursor_y].length())
-                        term_lines[cursor_y] = term_lines[cursor_y].substring(0, cursor_x);
-                    else if (cursor_x == 0)
-                        term_lines[cursor_y] = "";
+                    char* line = term_lines[cursor_y];
+                    int len = strlen(line);
+                    if (cursor_x < len) {
+                        line[cursor_x] = '\0';
+                    } else if (cursor_x == 0) {
+                        line[0] = '\0';
+                    }
                         
                     for (int j = cursor_x; j < TERM_COLS; j++) term_attrs[cursor_y][j] = {false};
                 } else if (mode == 1) {
                     // Clear from start to cursor
-                    String& line = term_lines[cursor_y];
-                    while (line.length() <= cursor_x) line += ' ';
-                    for(int i=0; i<=cursor_x; i++) line.setCharAt(i, ' ');
+                    char* line = term_lines[cursor_y];
+                    int len = strlen(line);
+                    
+                    // Pad if needed
+                    while (len <= cursor_x) {
+                         if (len >= TERM_COLS) break;
+                         line[len] = ' ';
+                         len++;
+                    }
+                    line[len] = '\0';
+                    
+                    for(int i=0; i<=cursor_x; i++) {
+                        if (i < TERM_COLS) line[i] = ' ';
+                    }
                     for (int j = 0; j <= cursor_x; j++) term_attrs[cursor_y][j] = {false};
                 } else if (mode == 2) {
-                    term_lines[cursor_y] = "";
+                    term_lines[cursor_y][0] = '\0';
                     for (int j = 0; j < TERM_COLS; j++) term_attrs[cursor_y][j] = {false};
                 }
                 need_display_update = true;
@@ -663,12 +726,12 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
 
 void TerminalEmulator::scrollUp() {
     for (int i = scrollTop; i < scrollBottom; i++) {
-        term_lines[i] = term_lines[i + 1];
+        memcpy(term_lines[i], term_lines[i + 1], TERM_COLS + 1);
         for (int j = 0; j < TERM_COLS; j++) {
             term_attrs[i][j] = term_attrs[i + 1][j];
         }
     }
-    term_lines[scrollBottom] = "";
+    term_lines[scrollBottom][0] = '\0';
     for (int j = 0; j < TERM_COLS; j++) {
         term_attrs[scrollBottom][j].inverse = false;
     }
@@ -677,12 +740,12 @@ void TerminalEmulator::scrollUp() {
 
 void TerminalEmulator::scrollDown() {
     for (int i = scrollBottom; i > scrollTop; i--) {
-        term_lines[i] = term_lines[i - 1];
+        memcpy(term_lines[i], term_lines[i - 1], TERM_COLS + 1);
         for (int j = 0; j < TERM_COLS; j++) {
             term_attrs[i][j] = term_attrs[i - 1][j];
         }
     }
-    term_lines[scrollTop] = "";
+    term_lines[scrollTop][0] = '\0';
     for (int j = 0; j < TERM_COLS; j++) {
         term_attrs[scrollTop][j].inverse = false;
     }

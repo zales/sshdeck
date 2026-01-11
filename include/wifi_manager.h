@@ -16,6 +16,7 @@ public:
     void setSecurityManager(SecurityManager* sec);
     
     void setIdleCallback(std::function<void()> cb);
+    void setRenderCallback(std::function<void()> cb);
 
     // Attempt to connect using saved credentials or user selection
     // Returns true if successfully connected
@@ -27,7 +28,8 @@ public:
 
 private:
     void deleteCredential(int index);
-std::function<void()> idleCallback;
+    std::function<void()> idleCallback;
+    std::function<void()> renderCallback;
     
     TerminalEmulator& terminal;
     KeyboardManager& keyboard;

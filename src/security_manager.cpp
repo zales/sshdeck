@@ -65,42 +65,55 @@ void SecurityManager::changePin(const String& newPin) {
 }
 
 String SecurityManager::encrypt(const String& plainText) {
-    if (!keyValid || plainText.isEmpty()) return plainText; // Fallback or empty
+    if (!keyValid || plainText.isEmpty()) return plainText;
 
-    // 1. Prepare Buffer with Padding (PKCS#7)
+    // 1. Generate Random IV
+    unsigned char iv[16];
+    for (int i = 0; i < 16; i++) {
+        iv[i] = (unsigned char)(esp_random() & 0xFF);
+    }
+
+    // 2. Prepare Buffer with Padding (PKCS#7)
     int len = plainText.length();
     int pad = 16 - (len % 16);
     int paddedLen = len + pad;
     
+    // Allocate buffer for IV + Encrypted Content
+    // Structure: [IV (16 bytes)] [Ciphertext (N bytes)]
+    int totalLen = 16 + paddedLen;
+    unsigned char* outputBuf = new unsigned char[totalLen];
+    
+    // Copy IV to start of output
+    memcpy(outputBuf, iv, 16);
+    
+    // Prepare input padded buffer
     unsigned char* inputBuf = new unsigned char[paddedLen];
     memcpy(inputBuf, plainText.c_str(), len);
     for (int i = 0; i < pad; i++) {
         inputBuf[len + i] = (unsigned char)pad;
     }
 
-    // 2. Encrypt AES-256-CBC
-    unsigned char* outputBuf = new unsigned char[paddedLen];
-    unsigned char iv[16];
-    memcpy(iv, FIXED_IV, 16); // Setup IV (needs to be reset every op)
-
+    // 3. Encrypt AES-256-CBC
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
     mbedtls_aes_setkey_enc(&aes, aesKey, 256);
-    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, paddedLen, iv, inputBuf, outputBuf);
+    // Encrypt into output buffer offset by 16 bytes
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, paddedLen, iv, inputBuf, outputBuf + 16);
     mbedtls_aes_free(&aes);
 
-    // 3. Base64 Encode
+    delete[] inputBuf;
+
+    // 4. Base64 Encode Full Bundle
     size_t dlen = 0;
-    mbedtls_base64_encode(NULL, 0, &dlen, outputBuf, paddedLen); // Get size
+    mbedtls_base64_encode(NULL, 0, &dlen, outputBuf, totalLen); 
     
     unsigned char* b64Buf = new unsigned char[dlen + 1];
     size_t olen = 0;
-    mbedtls_base64_encode(b64Buf, dlen + 1, &olen, outputBuf, paddedLen);
+    mbedtls_base64_encode(b64Buf, dlen + 1, &olen, outputBuf, totalLen);
     b64Buf[olen] = '\0';
 
     String result = String((char*)b64Buf);
 
-    delete[] inputBuf;
     delete[] outputBuf;
     delete[] b64Buf;
 
@@ -108,45 +121,51 @@ String SecurityManager::encrypt(const String& plainText) {
 }
 
 String SecurityManager::decrypt(const String& cipherText) {
-    if (!keyValid || cipherText.isEmpty()) return cipherText;
+    if (!keyValid || cipherText.isEmpty()) return "";
 
     // 1. Base64 Decode
-    size_t dlen = 0;
-    unsigned char* inputData = (unsigned char*)cipherText.c_str();
-    size_t inputLen = cipherText.length();
-
-    mbedtls_base64_decode(NULL, 0, &dlen, inputData, inputLen); // Get size
-    unsigned char* encBuf = new unsigned char[dlen];
+    size_t len = cipherText.length();
+    
+    // Calculate required buffer size: (len * 3) / 4 + safety
+    size_t bufSize = (len * 3 / 4) + 16; 
+    unsigned char* encBuf = new unsigned char[bufSize];
     size_t olen = 0;
     
-    if (mbedtls_base64_decode(encBuf, dlen, &olen, inputData, inputLen) != 0) {
+    if (mbedtls_base64_decode(encBuf, bufSize, &olen, (const unsigned char*)cipherText.c_str(), len) != 0) {
         delete[] encBuf;
         return ""; // Decode failed
     }
 
-    // 2. Decrypt AES-256-CBC
-    unsigned char* decBuf = new unsigned char[olen];
+    // Check minimum length (IV + at least 1 block)
+    if (olen < 32) {
+        delete[] encBuf;
+        return "";
+    }
+
+    // 2. Extract IV
     unsigned char iv[16];
-    memcpy(iv, FIXED_IV, 16);
+    memcpy(iv, encBuf, 16); // First 16 bytes are IV
+
+    // 3. Decrypt AES-256-CBC (Skipping first 16 bytes of IV)
+    int cipherLen = olen - 16;
+    unsigned char* decBuf = new unsigned char[cipherLen];
 
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
     mbedtls_aes_setkey_dec(&aes, aesKey, 256);
-    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, olen, iv, encBuf, decBuf);
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, cipherLen, iv, encBuf + 16, decBuf);
     mbedtls_aes_free(&aes);
 
-    // 3. Remove Padding (PKCS#7)
-    int pad = decBuf[olen - 1];
+    // 4. Remove Padding (PKCS#7)
+    int pad = decBuf[cipherLen - 1];
     if (pad > 0 && pad <= 16) {
-        // Basic sanity check on padding
-        decBuf[olen - pad] = '\0';
+        decBuf[cipherLen - pad] = '\0';
         String result = String((char*)decBuf);
         delete[] encBuf;
         delete[] decBuf;
         return result;
     }
 
-    // Invalid padding? Return raw or empty.
     delete[] encBuf;
     delete[] decBuf;
     return "";

@@ -18,6 +18,7 @@ void App::setup() {
 
     // Setup WiFi (Scan or Connect)
     wifi.setSecurityManager(&security);
+    wifi.setRenderCallback([this]() { this->drawTerminalScreen(); });
     wifi.connect(); 
     
     serverManager.setSecurityManager(&security);
@@ -64,7 +65,8 @@ void App::initializeHardware() {
     
     if (!display.begin()) {
         Serial.println("Display init failed!");
-        while (1) delay(1000);
+        delay(5000);
+        esp_restart();
     }
     
     // Welcome Screen
@@ -76,7 +78,8 @@ void App::initializeHardware() {
     if (!keyboard.begin()) {
         ui.updateBootStatus("Keyboard FAIL!");
         Serial.println("Keyboard init failed!");
-        while (1) delay(1000);
+        delay(5000);
+        esp_restart();
     }
     ui.updateBootStatus("Keyboard OK");
 }
@@ -281,9 +284,9 @@ void App::drawTerminalScreen() {
         int char_w = 6;
         
         for (int row = 0; row < TERM_ROWS; row++) {
-            const String& line = terminal.getLine(row);
-            if (line.length() > 0) {
-                for (int col = 0; col < line.length() && col < TERM_COLS; col++) {
+            const char* line = terminal.getLine(row);
+            if (line[0] != '\0') {
+                for (int col = 0; line[col] != '\0' && col < TERM_COLS; col++) {
                     char ch = line[col];
                     bool inv = terminal.getAttr(row, col).inverse;
                     
@@ -312,8 +315,8 @@ void App::drawTerminalScreen() {
                 int c_x_px = cx * char_w;
                 int c_y_px = y_start + (cy * line_h);
                 char cursorChar = ' ';
-                const String& line = terminal.getLine(cy);
-                if (cx < line.length()) cursorChar = line[cx];
+                const char* line = terminal.getLine(cy);
+                if (cx < (int)strlen(line)) cursorChar = line[cx];
                 
                 display.fillRect(c_x_px, c_y_px - 8, char_w, line_h, GxEPD_BLACK);
                 u8g2.setFontMode(1);

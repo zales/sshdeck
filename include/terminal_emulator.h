@@ -22,7 +22,7 @@ public:
     void appendString(const char* str);
     void clear();
     
-    const String& getLine(int row) const;
+    const char* getLine(int row) const;
     const CharAttr& getAttr(int row, int col) const;
     
     int getCursorX() const { return cursor_x; }
@@ -34,15 +34,15 @@ public:
     bool isAppCursorMode() const { return application_cursor_mode; }
     
 private:
-    // Buffers
-    String lines_primary[TERM_ROWS];
+    // Buffers - Fixed char arrays to prevent heap fragmentation
+    char lines_primary[TERM_ROWS][TERM_COLS + 1];
     CharAttr attrs_primary[TERM_ROWS][TERM_COLS];
     
-    String lines_alt[TERM_ROWS];
+    char lines_alt[TERM_ROWS][TERM_COLS + 1];
     CharAttr attrs_alt[TERM_ROWS][TERM_COLS];
     
     // Pointers to active buffer
-    String* term_lines; 
+    char (*term_lines)[TERM_COLS + 1]; 
     CharAttr (*term_attrs)[TERM_COLS];
     bool is_alt_buffer;
 
