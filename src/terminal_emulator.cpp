@@ -3,7 +3,7 @@
 TerminalEmulator::TerminalEmulator() 
     : cursor_x(0), cursor_y(0), saved_cursor_x(0), saved_cursor_y(0),
       current_inverse(false), ansi_state(ANSI_NORMAL),
-      show_cursor(true), need_display_update(false),
+      show_cursor(true), application_cursor_mode(false), need_display_update(false),
       scrollTop(0), scrollBottom(TERM_ROWS - 1),
       is_alt_buffer(false), use_line_drawing(false) {
       
@@ -85,22 +85,28 @@ void TerminalEmulator::appendChar(char c) {
         
         // Handle DEC Line Drawing mapping
         if (use_line_drawing) {
-            // Map common line drawing chars to ASCII equivalents
+            // Map common line drawing chars to ASCII equivalents (poor man's graphics)
             switch (c) {
-                case 'j': display_char = '+'; break; // Bottom Right
-                case 'k': display_char = '+'; break; // Top Right
-                case 'l': display_char = '+'; break; // Top Left
-                case 'm': display_char = '+'; break; // Bottom Left
-                case 'n': display_char = '+'; break; // Crossing
-                case 'q': display_char = '-'; break; // Horizontal
-                case 'x': display_char = '|'; break; // Vertical
-                case 't': display_char = '+'; break; // Left T
-                case 'u': display_char = '+'; break; // Right T
-                case 'v': display_char = '+'; break; // Bottom T
-                case 'w': display_char = '+'; break; // Top T
-                case 'a': display_char = '#'; break; // Board
-                case '`': display_char = '+'; break; // Diamond
-                // Add more if needed, these cover htop boxes
+                case 'j': display_char = '+'; break; // Bottom Right -> +
+                case 'k': display_char = '+'; break; // Top Right -> +
+                case 'l': display_char = '+'; break; // Top Left -> +
+                case 'm': display_char = '+'; break; // Bottom Left -> +
+                case 'n': display_char = '+'; break; // Crossing -> +
+                case 'q': display_char = '-'; break; // Horizontal -> -
+                case 'x': display_char = '|'; break; // Vertical -> |
+                case 't': display_char = '+'; break; // Left T -> +
+                case 'u': display_char = '+'; break; // Right T -> +
+                case 'v': display_char = '+'; break; // Bottom T -> +
+                case 'w': display_char = '+'; break; // Top T -> +
+                case 'a': display_char = '#'; break; // Board -> #
+                case '`': display_char = '+'; break; // Diamond -> +
+                case '0': display_char = '#'; break; // Block
+                case '.': display_char = 'v'; break; // Down Arrow
+                case ',': display_char = '<'; break; // Left Arrow
+                case '+': display_char = '>'; break; // Right Arrow
+                case '-': display_char = '^'; break; // Up Arrow
+                case 'h': display_char = '#'; break; // Board
+                case '~': display_char = '*'; break; // Bullet
             }
         }
 
@@ -591,7 +597,9 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'h': // Set Mode
             if (is_private) {
                 for (int i=0; i<param_count; i++) {
-                     if (params[i] == 25) {
+                     if (params[i] == 1) {
+                         application_cursor_mode = true;
+                     } else if (params[i] == 25) {
                          show_cursor = true;
                      } else if (params[i] == 47 || params[i] == 1047 || params[i] == 1049) {
                          // Switch to Alternate Screen Buffer
@@ -614,7 +622,9 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'l': // Reset Mode
             if (is_private) {
                 for (int i=0; i<param_count; i++) {
-                     if (params[i] == 25) {
+                     if (params[i] == 1) {
+                         application_cursor_mode = false;
+                     } else if (params[i] == 25) {
                          show_cursor = false;
                      } else if (params[i] == 47 || params[i] == 1047 || params[i] == 1049) {
                          // Switch to Normal Screen Buffer

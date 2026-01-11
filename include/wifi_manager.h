@@ -8,15 +8,25 @@
 #include "display_manager.h"
 // #include "touch_manager.h"
 
-class WifiSetup {
+#include <functional>
+
+class WifiManager {
 public:
-    WifiSetup(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp);
+    WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp);
     
+    void setIdleCallback(std::function<void()> cb);
+
     // Attempt to connect using saved credentials or user selection
     // Returns true if successfully connected
     bool connect(); 
+    
+    // Manage saved networks (List, Edit, Delete)
+    void manage();
 
 private:
+    void deleteCredential(int index);
+std::function<void()> idleCallback;
+    
     TerminalEmulator& terminal;
     KeyboardManager& keyboard;
     DisplayManager& display;
@@ -32,12 +42,14 @@ private:
     static const int MAX_SAVED_NETWORKS = 5;
     WifiCreds savedNetworks[MAX_SAVED_NETWORKS];
     int lastUsedIndex = -1;
+    int maxSavedIndex = 0;
     
     void loadCredentials();
     void saveCredentials(const String& ssid, const String& pass);
     bool tryConnect(const String& ssid, const String& pass);
     void scanAndSelect();
     String readInput(bool passwordMask = false);
+    String readInput(const String& prompt, bool passwordMask);
     
     // Helper to refresh display during input loops
     void refreshScreen();

@@ -1,40 +1,30 @@
 #include "ssh_client.h"
+#include <driver/rtc_io.h>
 #include "keymap.h"
+#include "board_def.h"
 
 SSHClient::SSHClient(TerminalEmulator& term, KeyboardManager& kb) 
     : terminal(term), keyboard(kb), session(nullptr), channel(nullptr), 
       ssh_connected(false), last_update(0) {
 }
 
+void SSHClient::setRefreshCallback(std::function<void()> callback) {
+    onRefresh = callback;
+}
+
+void SSHClient::setHelpCallback(std::function<void()> callback) {
+    onHelp = callback;
+}
+
 SSHClient::~SSHClient() {
     disconnect();
 }
 
-bool SSHClient::connectWiFi() {
-    terminal.appendString("Connecting WiFi...\n");
-    
-    WiFi.setHostname(WIFI_HOSTNAME);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    
-    int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 20) {
-        delay(500);
-        tries++;
-    }
-    
-    if (WiFi.status() == WL_CONNECTED) {
-        terminal.appendString("WiFi Connected!\nIP: ");
-        terminal.appendString(WiFi.localIP().toString().c_str());
-        terminal.appendString("\n");
-        return true;
-    } else {
-        terminal.appendString("WiFi Failed!\n");
-        return false;
-    }
-}
-
-bool SSHClient::connectSSH() {
-    terminal.appendString("Connecting SSH...\n");
+bool SSHClient::connectSSH(const char* host, int port, const char* user, const char* password) {
+    terminal.appendString("Connecting SSH to ");
+    terminal.appendString(host);
+    terminal.appendString("...\n");
+    if (onRefresh) onRefresh();
     
     // Initialize SSH session
     session = ssh_new();
@@ -43,10 +33,9 @@ bool SSHClient::connectSSH() {
         return false;
     }
     
-    ssh_options_set(session, SSH_OPTIONS_HOST, SSH_HOST);
-    int port = SSH_PORT;
+    ssh_options_set(session, SSH_OPTIONS_HOST, host);
     ssh_options_set(session, SSH_OPTIONS_PORT, &port);
-    ssh_options_set(session, SSH_OPTIONS_USER, SSH_USER);
+    ssh_options_set(session, SSH_OPTIONS_USER, user);
     
     // Disable logging for production performance
     int verbosity = SSH_LOG_NOLOG;
@@ -61,7 +50,30 @@ bool SSHClient::connectSSH() {
     }
     
     // Authenticate
-    if (ssh_userauth_password(session, nullptr, SSH_PASS) != SSH_AUTH_SUCCESS) {
+    int rc = SSH_AUTH_DENIED;
+    
+    if (SSH_USE_KEY && strlen(SSH_KEY_DATA) > 10) {
+        terminal.appendString("Using Key Auth...\n");
+        if (onRefresh) onRefresh();
+        ssh_key privkey;
+        if (ssh_pki_import_privkey_base64(SSH_KEY_DATA, nullptr, nullptr, nullptr, &privkey) == SSH_OK) {
+            rc = ssh_userauth_publickey(session, nullptr, privkey);
+            ssh_key_free(privkey);
+        } else {
+            terminal.appendString("Key import failed!\n");
+        }
+    }
+
+    // Fallback to password (provided or macro fallback) -> actually use the provided one
+    if (rc != SSH_AUTH_SUCCESS) {
+        if (SSH_USE_KEY) {
+             terminal.appendString("Key auth failed, trying password...\n");
+             if (onRefresh) onRefresh();
+        }
+        rc = ssh_userauth_password(session, nullptr, password);
+    }
+    
+    if (rc != SSH_AUTH_SUCCESS) {
         terminal.appendString("SSH auth failed!\n");
         ssh_disconnect(session);
         ssh_free(session);
@@ -115,7 +127,9 @@ bool SSHClient::connectSSH() {
     
     terminal.appendString("SSH Connected!\n\n");
     ssh_connected = true;
+    connectedHost = String(host);
     last_update = millis();
+    if (onRefresh) onRefresh();
     
     return true;
 }
@@ -139,34 +153,66 @@ void SSHClient::disconnect() {
 void SSHClient::process() {
     if (!ssh_connected) return;
     
+    // Reset shortcut flag if Mic released
+    if (!keyboard.isMicActive()) {
+        mic_shortcut_used = false;
+    }
+
     processKeyboardInput();
     processSSHOutput();
+
+    // Check for Long Press Mic (Help)
+    // Only if no other key was pressed during this hold (mic_shortcut_used == false)
+    if (keyboard.isMicActive() && !mic_shortcut_used) {
+         unsigned long pressTime = keyboard.getMicPressTime();
+         if (pressTime != last_mic_press_handled && (millis() - pressTime > 800)) {
+             last_mic_press_handled = pressTime;
+             if (onHelp) onHelp();
+         }
+    }
 }
 
 void SSHClient::processKeyboardInput() {
     // Process all pending key events
     while (keyboard.available() > 0) {
         char c = keyboard.getKeyChar();
+        
         if (c == 0) continue; // Skip release events or modifier-only changes
         
-        // Check for SYM combinations (arrows, ESC, TAB)
-        if (keyboard.isSymActive()) {
-            char base_c = 0;
-            // Find base character from keymap
-            for (int row = 0; row < KEY_ROWS; row++) {
-                for (int col = 0; col < KEY_COLS; col++) {
-                    if (keymap_lower[row][col] == c) {
-                        base_c = c;
-                        break;
-                    }
-                }
-                if (base_c) break;
-            }
-            
-            if (base_c) {
-                handleSYMCombinations(base_c);
-                continue; // Done with this char
-            }
+        // shortcuts via Mic (which is Ctrl)
+        if (keyboard.isMicActive()) {
+             mic_shortcut_used = true;
+             
+             // Since Mic is Ctrl, 'c' is already a Control character (1-26) if it was a-z
+             // We need to check what the physical key was, or infer from the control char.
+             // Ctrl + W is 23 ('w' - 'a' + 1)
+             // Ctrl + A is 1
+             // Ctrl + S is 19
+             // Ctrl + D is 4
+             // Ctrl + Q is 17
+             // Ctrl + E is 5
+             // Ctrl + H is 8 (Backspace usually, but here 'h')
+             
+             // Restore base char for mapping check
+             char base = 0;
+             if (c >= 1 && c <= 26) {
+                 base = c + 'a' - 1;
+             }
+             
+             if (base == 'h') {
+                 if(onHelp) onHelp();
+                 continue;
+             }
+             
+             if (base != 0 && handleMicShortcuts(base)) {
+                 continue;
+             }
+             // If not handled as shortcut, fall through to send the Ctrl character (e.g. Ctrl-C)
+        }
+        
+        // shortcuts via Alt (F1-F9)
+        if (keyboard.isAltActive()) {
+            if (handleAltShortcuts(c)) continue;
         }
         
         // Regular character
@@ -174,48 +220,111 @@ void SSHClient::processKeyboardInput() {
     }
 }
 
-void SSHClient::handleSYMCombinations(char base_c) {
+bool SSHClient::handleAltShortcuts(char c) {
+    // Map base characters (where numbers are printed) to F-keys
+    // F1=\033OP, F2=\033OQ, F3=\033OR, F4=\033OS
+    // F5=\033[15~, F6=\033[17~, F7=\033[18~, F8=\033[19~, F9=\033[20~
+    
+    switch (c) {
+        case 'w': // 1 -> F1
+            ssh_channel_write(channel, "\x1BOP", 3);
+            return true;
+        case 'e': // 2 -> F2
+            ssh_channel_write(channel, "\x1BOQ", 3);
+            return true;
+        case 'r': // 3 -> F3
+            ssh_channel_write(channel, "\x1BOR", 3);
+            return true;
+        case 's': // 4 -> F4
+            ssh_channel_write(channel, "\x1BOS", 3);
+            return true;
+        case 'd': // 5 -> F5
+            ssh_channel_write(channel, "\x1B[15~", 5);
+            return true;
+        case 'f': // 6 -> F6
+            ssh_channel_write(channel, "\x1B[17~", 5);
+            return true;
+        case 'z': // 7 -> F7
+            ssh_channel_write(channel, "\x1B[18~", 5);
+            return true;
+        case 'x': // 8 -> F8
+            ssh_channel_write(channel, "\x1B[19~", 5);
+            return true;
+        case 'c': // 9 -> F9
+            ssh_channel_write(channel, "\x1B[20~", 5);
+            return true;
+    }
+    return false;
+}
+
+bool SSHClient::handleMicShortcuts(char base_c) {
+    bool appMode = terminal.isAppCursorMode();
+    
     switch (base_c) {
         case 'w':  // Up arrow
-            ssh_channel_write(channel, "\x1B[A", 3);
-            break;
+            if(appMode) ssh_channel_write(channel, "\x1BOA", 3);
+            else        ssh_channel_write(channel, "\x1B[A", 3);
+            return true;
         case 'a':  // Left arrow
-            ssh_channel_write(channel, "\x1B[D", 3);
-            break;
+            if(appMode) ssh_channel_write(channel, "\x1BOD", 3);
+            else        ssh_channel_write(channel, "\x1B[D", 3);
+            return true;
         case 's':  // Down arrow
-            ssh_channel_write(channel, "\x1B[B", 3);
-            break;
+            if(appMode) ssh_channel_write(channel, "\x1BOB", 3);
+            else        ssh_channel_write(channel, "\x1B[B", 3);
+            return true;
         case 'd':  // Right arrow
-            ssh_channel_write(channel, "\x1B[C", 3);
-            break;
+            if(appMode) ssh_channel_write(channel, "\x1BOC", 3);
+            else        ssh_channel_write(channel, "\x1B[C", 3);
+            return true;
         case 'q': {  // ESC
             char esc = '\x1B';
             ssh_channel_write(channel, &esc, 1);
-            break;
+            return true;
         }
         case 'e': {  // TAB
             char tab = '\t';
             ssh_channel_write(channel, &tab, 1);
-            break;
+            return true;
         }
     }
+    return false;
 }
 
 void SSHClient::processSSHOutput() {
     char buffer[1024];
     int total_read = 0;
     
+    if (!ssh_connected || channel == nullptr) return;
+    
     // Read until buffer is empty or we processed a safety limit
     while (total_read < 8192) { // Safety limit 8KB per loop
         int nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer) - 1, 0);
         
-        if (nbytes <= 0) break;
-        
-        buffer[nbytes] = '\0';
-        for (int i = 0; i < nbytes; i++) {
-            terminal.appendChar(buffer[i]);
+        if (nbytes < 0) {
+             // Error occurred
+             disconnect();
+             return;
         }
-        total_read += nbytes;
-        last_update = millis();
+        
+        if (nbytes > 0) {
+            buffer[nbytes] = '\0';
+            for (int i = 0; i < nbytes; i++) {
+                terminal.appendChar(buffer[i]);
+            }
+            total_read += nbytes;
+            last_update = millis();
+        } else {
+            // nbytes == 0, check for EOF
+            if (ssh_channel_is_eof(channel)) {
+                disconnect();
+                return;
+            }
+            break; 
+        }
+    }
+    
+    if (ssh_channel_is_closed(channel)) {
+        disconnect();
     }
 }

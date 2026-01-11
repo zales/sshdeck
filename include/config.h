@@ -1,15 +1,15 @@
 #pragma once
 
-// WiFi Configuration
-#define WIFI_SSID     "Zales"
-#define WIFI_PASSWORD "n2w85r3mg2xs9"
-#define WIFI_HOSTNAME "tvoje-mama"
-
-// SSH Configuration
-#define SSH_HOST      "192.168.1.195"
-#define SSH_USER      "zales"
-#define SSH_PASS      "9B4990uqondrasek"
-#define SSH_PORT      22
+// SSH Key Configuration
+// Paste your private key between the quotes. valid format:
+// R"(
+// -----BEGIN OPENSSH PRIVATE KEY-----
+// ...
+// -----END OPENSSH PRIVATE KEY-----
+// )"
+#define SSH_KEY_DATA  R"()" 
+// Set to true to prefer key auth over password
+#define SSH_USE_KEY   false
 
 // Terminal Configuration
 #define TERM_COLS     40

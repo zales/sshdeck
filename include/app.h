@@ -1,0 +1,56 @@
+#pragma once
+
+#include <Arduino.h>
+#include <vector>
+#include "config.h"
+#include "display_manager.h"
+#include "keyboard_manager.h"
+#include "terminal_emulator.h"
+#include "ssh_client.h"
+#include "server_manager.h"
+#include "ui/menu_system.h"
+#include "wifi_manager.h"
+
+enum AppState {
+    STATE_MENU,
+    STATE_TERMINAL
+};
+
+class App {
+public:
+    App();
+    void setup();
+    void loop();
+
+private:
+    // Subsystems
+    DisplayManager display;
+    KeyboardManager keyboard;
+    TerminalEmulator terminal;
+    ServerManager serverManager;
+    WifiManager wifi;
+    MenuSystem* menu;
+    SSHClient* sshClient;
+
+    // State
+    AppState currentState;
+    unsigned long pwrBtnStart;
+
+    // Helper Methods
+    void initializeHardware();
+    void enterDeepSleep();
+    void checkPowerButton();
+    float getBatteryVoltage();
+    int getBatteryPercentage();
+
+    // UI & Logic
+    void drawTerminalScreen();
+    void showHelpScreen();
+    
+    // Menu Handlers
+    void handleMainMenu();
+    void handleSavedServers();
+    void handleQuickConnect();
+    void handleSettings();
+    void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name);
+};

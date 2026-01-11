@@ -38,6 +38,9 @@
 #define BOARD_TOUCH_INT 12
 #define BOARD_TOUCH_RST 45
 
+// Vibration Motor
+#define BOARD_VIBRATION 2
+
 // Power / Other
 #define BOARD_KEYBOARD_LED 42
 #define BOARD_POWERON      10

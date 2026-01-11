@@ -1,15 +1,34 @@
 #include "keyboard_manager.h"
-#include "utilities.h"
+#include "board_def.h"
 #include "keymap.h"
 
 KeyboardManager::KeyboardManager() 
-    : sym_active(false), shift_active(false), ctrl_active(false) {
+    : sym_active(false), shift_active(false), ctrl_active(false), alt_active(false) {
 }
 
 bool KeyboardManager::begin() {
+    // Setup Backlight
+    pinMode(BOARD_KEYBOARD_LED, OUTPUT);
+    digitalWrite(BOARD_KEYBOARD_LED, HIGH); // Default On
+
+    // Setup Vibration (PWM)
+    ledcSetup(0, 2000, 8); // Channel 0, 2kHz, 8-bit
+    ledcAttachPin(BOARD_VIBRATION, 0);
+    ledcWrite(0, 0);
+
     // Initialize I2C
     Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
     Wire.setClock(100000);
+    
+    // Create Vibration Task
+    vibeQueue = xQueueCreate(10, sizeof(uint8_t));
+    xTaskCreate(
+        vibrationTask,    /* Task function. */
+        "VibeTask",       /* String with name of task. */
+        2048,             /* Stack size in bytes. */
+        this,             /* Parameter passed as input of the task */
+        1,                /* Priority of the task. */
+        NULL);            /* Task handle. */
     
     return initializeKeypad();
 }
@@ -21,6 +40,8 @@ bool KeyboardManager::initializeKeypad() {
             keypad.matrix(KEY_ROWS, KEY_COLS);
             pinMode(KEYPAD_INT, INPUT_PULLUP);
             keypad.enableInterrupts();
+            // Enable hardware debounce
+            keypad.enableDebounce();
             keypad.flush();
             return true;
         }
@@ -52,6 +73,10 @@ char KeyboardManager::getKeyChar() {
     // Meshtastic TDeckProKeyboard uses IsPressed = (k & 0x80)
     bool pressed = (key_code & 0x80) != 0;
     
+    if (pressed) {
+        triggerVibration();
+    }
+
     // Key ID is in the lower 7 bits (1-based index)
     int key = key_code & 0x7F;
     
@@ -78,6 +103,7 @@ char KeyboardManager::processKeyEvent(int row, int col, bool pressed) {
     bool is_shift_key = ((row == KEY_SHIFT_L_ROW && col == KEY_SHIFT_L_COL) || 
                          (row == KEY_SHIFT_R_ROW && col == KEY_SHIFT_R_COL));
     bool is_mic_key = (row == KEY_MIC_ROW && col == KEY_MIC_COL);
+    bool is_alt_key = (row == KEY_ALT_ROW && col == KEY_ALT_COL);
     
     if (is_sym_key) {
         sym_active = pressed;
@@ -87,10 +113,17 @@ char KeyboardManager::processKeyEvent(int row, int col, bool pressed) {
         shift_active = pressed;
         return 0;
     }
+    if (is_alt_key) {
+        alt_active = pressed;
+        return 0;
+    }
     if (is_mic_key) {
         // Microphone key acts as '0' when SYM is active, otherwise as Ctrl
         if (sym_active && pressed) {
             return keymap_symbol[row][col];
+        }
+        if (pressed && !ctrl_active) {
+            mic_press_time = millis();
         }
         ctrl_active = pressed;
         return 0;
@@ -99,6 +132,12 @@ char KeyboardManager::processKeyEvent(int row, int col, bool pressed) {
     // Only emit on press
     if (!pressed) return 0;
     
+    // Check for Alt+B (Toggle Backlight)
+    if (alt_active && keymap_lower[row][col] == 'b') {
+        toggleBacklight();
+        return 0;
+    }
+
     // Special keys
     if (row == KEY_ENTER_ROW && col == KEY_ENTER_COL) return '\n';
     if (row == KEY_BACKSPACE_ROW && col == KEY_BACKSPACE_COL) return 0x08;
@@ -126,4 +165,33 @@ char KeyboardManager::processKeyEvent(int row, int col, bool pressed) {
     }
     
     return c;
+}
+
+void KeyboardManager::triggerVibration() {
+    uint8_t dummy = 1;
+    // Non-blocking send, if queue full, drop it
+    xQueueSend(vibeQueue, &dummy, 0); 
+}
+
+void KeyboardManager::vibrationTask(void* parameter) {
+    KeyboardManager* km = (KeyboardManager*)parameter;
+    uint8_t msg;
+    
+    for(;;) {
+        if (xQueueReceive(km->vibeQueue, &msg, portMAX_DELAY) == pdTRUE) {
+            ledcWrite(0, 128); // 50% power
+            vTaskDelay(pdMS_TO_TICKS(5)); // 5ms duration
+            ledcWrite(0, 0);
+            vTaskDelay(pdMS_TO_TICKS(20)); // Cooldown
+        }
+    }
+}
+
+void KeyboardManager::setBacklight(bool on) {
+    digitalWrite(BOARD_KEYBOARD_LED, on ? HIGH : LOW);
+}
+
+void KeyboardManager::toggleBacklight() {
+    int state = digitalRead(BOARD_KEYBOARD_LED);
+    setBacklight(state == LOW);
 }

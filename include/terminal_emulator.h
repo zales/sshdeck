@@ -31,6 +31,7 @@ public:
     
     bool needsUpdate() const { return need_display_update; }
     void clearUpdateFlag() { need_display_update = false; }
+    bool isAppCursorMode() const { return application_cursor_mode; }
     
 private:
     // Buffers
@@ -56,6 +57,7 @@ private:
     int scrollBottom;  // Bottom margin (0-based, inclusive)
     bool current_inverse;
     bool show_cursor;
+    bool application_cursor_mode; // DECCKM
     
     bool need_display_update;
     
