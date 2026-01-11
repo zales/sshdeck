@@ -20,7 +20,7 @@ public:
     void setRefreshCallback(std::function<void()> callback);
     void setHelpCallback(std::function<void()> callback);
 
-    bool connectSSH(const char* host, int port, const char* user, const char* password);
+    bool connectSSH(const char* host, int port, const char* user, const char* password, const char* keyData = nullptr);
     void disconnect();
     
     bool isConnected() const { return ssh_connected; }

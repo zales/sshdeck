@@ -22,6 +22,9 @@ public:
     String encrypt(const String& plainText);
     String decrypt(const String& cipherText);
 
+    void saveSSHKey(const String& key);
+    String getSSHKey();
+
     bool isKeySet() const { return keyValid; }
 
 private:

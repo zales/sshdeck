@@ -357,7 +357,10 @@ void App::connectToServer(const String& host, int port, const String& user, cons
             }
     }
 
-    if (sshClient->connectSSH(host.c_str(), port, user.c_str(), pass.c_str())) {
+    String privKey = security.getSSHKey();
+    const char* keyData = (privKey.length() > 0) ? privKey.c_str() : nullptr;
+
+    if (sshClient->connectSSH(host.c_str(), port, user.c_str(), pass.c_str(), keyData)) {
         currentState = STATE_TERMINAL;
     } else {
             menu->drawMessage("Error", "SSH Failed");
@@ -434,6 +437,7 @@ void App::handleSettings() {
         std::vector<String> items = {
             "Change PIN",
             "WiFi Network",
+            "Storage & Keys",
             "System Info",
             "Back"
         };
@@ -447,6 +451,9 @@ void App::handleSettings() {
              wifi.manage();
         } 
         else if (choice == 2) {
+             handleStorage();
+        }
+        else if (choice == 3) {
             String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Disconnected";
             String bat = String(getBatteryPercentage()) + "% (" + String(getBatteryVoltage()) + "V)";
             String ram = String(ESP.getFreeHeap() / 1024) + " KB";
@@ -493,9 +500,20 @@ void App::handleChangePin() {
     
     // 3. Re-Encrypt
     ui.drawMessage("Processing", "Re-encrypting data...");
-    security.changePin(newPin);
+    
+    // Decrypt SSH key with old PIN before changing it
+    String sshKey = security.getSSHKey();
+
+    security.changePin(newPin); // Updates AES key
+    
     serverManager.reEncryptAll();
     wifi.reEncryptAll();
+    
+    // Re-save SSH key with new PIN
+    if (sshKey.length() > 0) {
+        security.saveSSHKey(sshKey);
+    }
+
     ui.drawMessage("Success", "PIN Changed!");
 }
 
@@ -532,4 +550,27 @@ void App::unlockSystem() {
     ui.drawMessage("UNLOCKED", "System Ready");
     delay(1000); 
     display.setRefreshMode(false); 
+}
+void App::handleStorage() {
+    while(true) {
+        std::vector<String> items = {
+            "Import id_rsa",
+            "Back"
+        };
+        int choice = menu->showMenu("Storage & Keys", items);
+        
+        if (choice == 0) {
+             String key = storage.readSSHKey("/id_rsa");
+             if (key.length() > 20 && key.startsWith("-----BEGIN")) {
+                 security.saveSSHKey(key);
+                 ui.drawMessage("Success", "Key Imported!");
+                 delay(1000);
+             } else {
+                 ui.drawMessage("Error", "Invalid/Missing Key");
+                 delay(1000);
+             }
+        } else {
+            return;
+        }
+    }
 }

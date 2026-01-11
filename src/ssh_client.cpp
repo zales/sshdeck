@@ -20,7 +20,7 @@ SSHClient::~SSHClient() {
     disconnect();
 }
 
-bool SSHClient::connectSSH(const char* host, int port, const char* user, const char* password) {
+bool SSHClient::connectSSH(const char* host, int port, const char* user, const char* password, const char* keyData) {
     terminal.appendString("Connecting SSH to ");
     terminal.appendString(host);
     terminal.appendString("...\n");
@@ -52,11 +52,18 @@ bool SSHClient::connectSSH(const char* host, int port, const char* user, const c
     // Authenticate
     int rc = SSH_AUTH_DENIED;
     
-    if (SSH_USE_KEY && strlen(SSH_KEY_DATA) > 10) {
+    // Check provided key first, then macro fallback if needed
+    bool hasKey = (keyData != nullptr && strlen(keyData) > 10);
+    bool useMacroKey = (!hasKey && SSH_USE_KEY && strlen(SSH_KEY_DATA) > 10);
+
+    if (hasKey || useMacroKey) {
         terminal.appendString("Using Key Auth...\n");
         if (onRefresh) onRefresh();
         ssh_key privkey;
-        if (ssh_pki_import_privkey_base64(SSH_KEY_DATA, nullptr, nullptr, nullptr, &privkey) == SSH_OK) {
+        
+        const char* keyToUse = hasKey ? keyData : SSH_KEY_DATA;
+        
+        if (ssh_pki_import_privkey_base64(keyToUse, nullptr, nullptr, nullptr, &privkey) == SSH_OK) {
             rc = ssh_userauth_publickey(session, nullptr, privkey);
             ssh_key_free(privkey);
         } else {
@@ -64,7 +71,7 @@ bool SSHClient::connectSSH(const char* host, int port, const char* user, const c
         }
     }
 
-    // Fallback to password (provided or macro fallback) -> actually use the provided one
+    // Fallback to password
     if (rc != SSH_AUTH_SUCCESS) {
         if (SSH_USE_KEY) {
              terminal.appendString("Key auth failed, trying password...\n");

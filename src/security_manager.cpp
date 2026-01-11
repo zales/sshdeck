@@ -151,3 +151,19 @@ String SecurityManager::decrypt(const String& cipherText) {
     delete[] decBuf;
     return "";
 }
+#include "security_manager.h"
+
+void SecurityManager::saveSSHKey(const String& key) {
+    if (key.length() == 0) {
+        prefs.remove("ssh_priv_key");
+        return;
+    }
+    String enc = encrypt(key);
+    prefs.putString("ssh_priv_key", enc);
+}
+
+String SecurityManager::getSSHKey() {
+    String enc = prefs.getString("ssh_priv_key", "");
+    if (enc.length() == 0) return "";
+    return decrypt(enc);
+}

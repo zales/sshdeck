@@ -7,8 +7,8 @@ DisplayManager::DisplayManager()
 }
 
 bool DisplayManager::begin() {
-    // Initialize SPI for display
-    SPI.begin(BOARD_EPD_SCK, -1, BOARD_EPD_MOSI, BOARD_EPD_CS);
+    // Initialize SPI for display (Shared with SD Card)
+    SPI.begin(BOARD_EPD_SCK, BOARD_SPI_MISO, BOARD_EPD_MOSI, BOARD_EPD_CS);
     
     display.init(115200, true, 2, false);
     display.setRotation(DISPLAY_ROTATION);

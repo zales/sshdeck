@@ -12,6 +12,7 @@
 #include "ui/ui_manager.h"
 #include "wifi_manager.h"
 #include "security_manager.h"
+#include "storage_manager.h"
 
 enum AppState {
     STATE_MENU,
@@ -31,6 +32,7 @@ private:
     UIManager ui;
     TerminalEmulator terminal;
     ServerManager serverManager;
+    StorageManager storage;
     WifiManager wifi;
     MenuSystem* menu;
     SSHClient* sshClient;
@@ -58,5 +60,6 @@ private:
     void handleQuickConnect();
     void handleSettings();
     void handleChangePin();
+    void handleStorage();
     void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name);
 };
