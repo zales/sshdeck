@@ -212,17 +212,6 @@ int App::getBatteryPercentage() {
 }
 
 bool App::isCharging() {
-    // T-Deck doesn't have a harware charge pin.
-    // We infer charging if voltage is > 4.15V or if USB Serial is active (data connection).
-    // Note: USB Serial is a strong indicator of power, but not necessarily "charging" if battery is full.
-    // High voltage is the best indicator of "actively charging or full".
-    
-    if (getBatteryVoltage() > 4.15) return true;
-    
-    // Check if USB CDC is connected (Host present)
-    // This happens if plugged into computer, which means it IS charging (slowly or fast)
-    if (Serial) return true;
-    
     return false;
 }
 
