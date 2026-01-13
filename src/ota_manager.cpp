@@ -1,8 +1,64 @@
 #include "ota_manager.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 
 OtaManager::OtaManager(DisplayManager& disp) : display(disp) {
+}
+
+UpdateManifest OtaManager::fetchManifest(const String& manifestUrl, const String& rootCaCert) {
+    UpdateManifest result;
+    result.latestVersion = "";
+    
+    if (WiFi.status() != WL_CONNECTED) {
+        return result;
+    }
+    
+    HTTPClient http;
+    WiFiClientSecure* client = new WiFiClientSecure;
+    if(rootCaCert.length() > 0) {
+        client->setCACert(rootCaCert.c_str());
+    } else {
+        client->setInsecure();
+    }
+    
+    Serial.println("Fetching manifest: " + manifestUrl);
+    
+    if (http.begin(*client, manifestUrl)) {
+        int httpCode = http.GET();
+        if (httpCode == HTTP_CODE_OK) {
+            String payload = http.getString();
+            Serial.println("Manifest payload: " + payload);
+            
+            // Parse JSON
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, payload);
+            
+            if (!error) {
+                result.latestVersion = doc["latest"].as<String>();
+                JsonArray versions = doc["versions"];
+                for (JsonObject v : versions) {
+                    FirmwareVersion fv;
+                    fv.version = v["version"].as<String>();
+                    fv.date = v["date"].as<String>();
+                    fv.url = v["url"].as<String>();
+                    result.versions.push_back(fv);
+                }
+            } else {
+                Serial.print("deserializeJson() failed: ");
+                Serial.println(error.c_str());
+            }
+
+        } else {
+            Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+        }
+        http.end();
+    } else {
+        Serial.println("Unable to connect");
+    }
+    
+    delete client;
+    return result;
 }
 
 void OtaManager::begin() {

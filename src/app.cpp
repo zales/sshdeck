@@ -151,24 +151,60 @@ void App::handleSystemUpdate() {
         return;
     }
 
-    String url = UPDATE_SERVER_URL;
+    String url = UPDATE_SERVER_URL; 
+    // If URL ends in .bin, we try to find a manifest .json instead if user wants full list
+    // Or we simply define MANIFEST_URL in config. 
+    // For now, let's construct manifest URL from base if possible, or just hardcode convention.
+    String manifestUrl = url;
+    manifestUrl.replace("firmware.bin", "firmware.json");
     
     ui.drawMessage("Checking...", "v" + String(APP_VERSION));
-    String newVer = ota.checkUpdateAvailable(url, APP_VERSION, UPDATE_ROOT_CA);
     
-    if (newVer == "") {
-        // No update or error
-        // But maybe the user forced it? 
-        // Let's ask if they want to reinstall if version check failed or same version
-        std::vector<String> opts = {"Reinstall?", "Cancel"};
-        if (menu->showMenu("No pending update", opts) != 0) return;
-    } else {
-        String msg = "New: " + newVer;
-        std::vector<String> opts = {"Update", "Cancel"};
-        if (menu->showMenu(msg, opts) != 0) return;
+    UpdateManifest manifest = ota.fetchManifest(manifestUrl, UPDATE_ROOT_CA);
+    
+    if (manifest.versions.empty()) {
+         // Fallback to legacy check if manifest request failed
+         String newVer = ota.checkUpdateAvailable(url, APP_VERSION, UPDATE_ROOT_CA);
+         if (newVer == "") {
+            std::vector<String> opts = {"Reinstall?", "Cancel"};
+            if (menu->showMenu("No update found", opts) != 0) return;
+            ota.updateFromUrl(url, UPDATE_ROOT_CA);
+         } else {
+             // Logic for simple update
+             ota.updateFromUrl(url, UPDATE_ROOT_CA);
+         }
+         return;
     }
 
-    ota.updateFromUrl(url, UPDATE_ROOT_CA);
+    // Show version selection menu
+    std::vector<String> options;
+    std::vector<String> urls;
+    
+    for (const auto& v : manifest.versions) {
+        String label = v.version;
+        if (v.version == String(APP_VERSION)) label += " (Curr)";
+        if (v.version == manifest.latestVersion) label += " *";
+        options.push_back(label);
+        urls.push_back(v.url);
+    }
+    options.push_back("Back");
+
+    while (true) {
+        int selected = menu->showMenu("Select Version", options);
+        if (selected < 0 || selected >= urls.size()) return; // Back or cancelled
+
+        String targetUrl = urls[selected];
+        String targetVer = manifest.versions[selected].version;
+        
+        // Confirmation
+        std::vector<String> confirmOpts = {"Yes, Flash it", "No"};
+        if (menu->showMenu("Flash v" + targetVer + "?", confirmOpts) == 0) {
+            ota.updateFromUrl(targetUrl, UPDATE_ROOT_CA);
+            // If update fails, it returns here
+            ui.drawMessage("Error", "Update Failed");
+            delay(2000);
+        }
+    }
 }
 
 void App::enterDeepSleep() {

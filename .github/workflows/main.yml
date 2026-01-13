@@ -3,6 +3,7 @@ name: Build and Deploy
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -45,7 +46,16 @@ jobs:
           pip install platformio
 
       - name: Build Firmware
-        run: platformio run
+        run: |
+          # Use tag as version if available, else 'dev'
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION="0.0.1-dev"
+          fi
+          echo "Building version $VERSION"
+          # Inject version into build
+          PLATFORMIO_BUILD_FLAGS="-DAPP_VERSION=\\\"$VERSION\\\"" platformio run
 
       - name: Prepare Web Flasher
         run: |
@@ -54,14 +64,38 @@ jobs:
           cp .pio/build/t-deck-pro/firmware.bin web_flasher/
           cp .pio/build/t-deck-pro/partitions.bin web_flasher/
           cp .pio/build/t-deck-pro/bootloader.bin web_flasher/
-          # boot_app0.bin should be in the repo or copied from framework
-          # If it's not in the repo, we try to find it (best effort)
-          # Assuming user committed web_flasher/boot_app0.bin
           
-          # Create version.txt for OTA check
-          echo "0.0.1" > web_flasher/firmware.txt
-          # Or extract from config.h if possible, but hardcoding for now or using simple grep
-          grep '#define APP_VERSION' include/config.h | cut -d '"' -f 2 > web_flasher/firmware.txt
+          # Create version.txt for legacy check (optional)
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION="0.0.1-dev"
+          fi
+          echo "$VERSION" > web_flasher/firmware.txt
+          
+          # Generate/Update Manifest for OTA
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            # We assume the script is committed or we create it here. 
+            # Ideally committed. We used create_file tool so it should be in the repo if committed.
+            # But CI checks out code. So we need to ensure the script exists in the checkout.
+            # Assuming user commits the scripts/ folder.
+            python3 scripts/update_manifest.py "${{ github.repository }}" "$VERSION"
+          else
+             # For dev builds, make a basic manifest pointing to this build's artifact?
+             # Or just skip. Let's make a dev manifest.
+             # On dev, URL is relative or we don't support full OTA selection from dev builds easily without releases.
+             echo '{"name":"SshDeck Dev","latest":"'$VERSION'","versions":[]}' > web_flasher/firmware.json
+          fi
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            web_flasher/firmware.bin
+            web_flasher/partitions.bin
+            web_flasher/bootloader.bin
+          generate_release_notes: true
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
