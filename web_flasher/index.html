@@ -3,52 +3,140 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SshDeck Web Installer</title>
+    <title>SshDeck Protocol Interface</title>
     <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
     <style>
+        :root {
+            --term-green: #0f0;
+            --term-bg: #0a0a0a;
+            --term-glow: 0 0 10px rgba(0, 255, 0, 0.5);
+            --scan-line: rgba(0, 255, 0, 0.1);
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Courier New', Courier, monospace;
             margin: 0;
             padding: 20px;
-            background: #f5f5f5;
+            background-color: var(--term-bg);
+            color: var(--term-green);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             min-height: 100vh;
+            overflow: hidden;
         }
+
+        /* CRT Scanline effect */
+        body::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(
+                to bottom,
+                var(--scan-line) 50%,
+                rgba(0, 0, 0, 0) 50%
+            );
+            background-size: 100% 4px;
+            z-index: 2;
+            pointer-events: none;
+        }
+
         .container {
-            background: white;
+            background: rgba(0, 20, 0, 0.8);
             padding: 40px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border: 1px solid var(--term-green);
+            box-shadow: var(--term-glow);
             text-align: center;
-            max-width: 400px;
+            max-width: 500px;
+            position: relative;
+            z-index: 3;
         }
+
         h1 {
             margin-top: 0;
-            color: #333;
-        }
-        p {
-            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            border-bottom: 1px solid var(--term-green);
+            padding-bottom: 10px;
             margin-bottom: 30px;
+            text-shadow: 0 0 5px var(--term-green);
         }
+
+        p {
+            margin-bottom: 30px;
+            line-height: 1.4;
+        }
+
         .note {
-            font-size: 0.85em;
-            color: #888;
-            margin-top: 20px;
+            font-size: 0.75em;
+            opacity: 0.7;
+            margin-top: 30px;
+            border-top: 1px dashed var(--term-green);
+            padding-top: 15px;
+        }
+
+        /* Customizing the ESP Web Tools button if possible via CSS variables or wrapper */
+        esp-web-install-button {
+            --esp-tools-button-color: #000;
+            --esp-tools-button-text-color: var(--term-green);
+            --esp-tools-button-border-radius: 0;
+            border: 1px solid var(--term-green);
+            background: transparent;
+            box-shadow: 0 0 5px var(--term-green);
+            display: inline-block; /* Ensure proper spacing */
+        }
+
+        /* Status indicator simulation */
+        .status {
+            text-align: left;
+            font-size: 0.8em;
+            margin-bottom: 20px;
+        }
+        .status::before {
+            content: "> ";
+        }
+        .blink {
+            animation: blinker 1s linear infinite;
+        }
+
+        @keyframes blinker {
+            50% { opacity: 0; }
+        }
+        
+        a {
+            color: var(--term-green);
+            text-decoration: underline;
+        }
+        a:hover {
+            background-color: var(--term-green);
+            color: black;
+            text-decoration: none;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>SshDeck Installer</h1>
-        <p>Connect your T-Deck via USB and click the button below to install the latest firmware.</p>
+        <h1>SshDeck Uplink</h1>
+        
+        <div class="status">
+            <div>SYSTEM: ONLINE</div>
+            <div>TARGET: T-DECK ESP32-S3</div>
+            <div>ENCRYPTION: ENABLED</div>
+            <div>WAITING FOR CONNECTION...<span class="blink">_</span></div>
+        </div>
+
+        <p>Initiate physical connection via USB interface. Authorize browser access to serial port to commence firmware injection.</p>
         
         <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
 
         <p class="note">
-            Note: You need a browser that supports Web Serial (Chrome, Edge, Opera).
+            SECURE BOOTLOADER V2.0 required for OTA functionality.<br>
+            Use Chrome/Edge for Web Serial API support.
         </p>
     </div>
 </body>

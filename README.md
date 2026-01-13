@@ -1,9 +1,8 @@
 # T-Deck Pro SSH Terminal
 
 ![Status](https://img.shields.io/badge/Status-Stable-brightgreen)
-![Platform](https://img.shields.io/badge/Platform-ESP32--S3-blue)
 
-A complete, production-ready SSH client firmware for the **LilyGO T-Deck Pro**. This project transforms the lo-fi handheld into a fully functional remote administration tool with a proper terminal emulator, WiFi management, and persistent configuration.
+A functional SSH client firmware for the **LilyGO T-Deck Pro**. This project transforms the lo-fi handheld into a fully functional remote administration tool with a proper terminal emulator, WiFi management, and persistent configuration.
 
 ## Features
 
