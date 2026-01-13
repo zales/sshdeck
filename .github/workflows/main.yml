@@ -92,6 +92,11 @@ jobs:
              # On dev, URL is relative or we don't support full OTA selection from dev builds easily without releases.
              echo '{"name":"SshDeck Dev","latest":"'$VERSION'","versions":[]}' > web_flasher/firmware.json
           fi
+          
+          # Update manifest.json version for Web Flasher (ESP Web Tools)
+          # We use a temporary python oneliner or sed since jq might not be robust enough if json structure varies, but jq is standard.
+          # Let's use jq (preinstalled on ubuntu-latest)
+          jq --arg v "$VERSION" '.version = $v' web_flasher/manifest.json > web_flasher/manifest.json.tmp && mv web_flasher/manifest.json.tmp web_flasher/manifest.json
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
