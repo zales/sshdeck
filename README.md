@@ -1,6 +1,7 @@
 # T-Deck Pro SSH Terminal
 
 ![Status](https://img.shields.io/badge/Status-Stable-brightgreen)
+[![Web Installer](https://img.shields.io/badge/Install-Web_Flasher-blue?style=for-the-badge&logo=googlechrome)](https://zales.github.io/sshdeck/)
 
 A functional SSH client firmware for the **LilyGO T-Deck Pro**. This project transforms the lo-fi handheld into a fully functional remote administration tool with a proper terminal emulator, WiFi management, and persistent configuration.
 
@@ -54,6 +55,14 @@ The keyboard logic is designed to maximize utility despite the limited key count
 
 ## Installation
 
+### Method 1: Web Installer (Recommended)
+The easiest way to install is via the browser-based flasher. No software required.
+
+1.  Connect T-Deck Pro to your computer via USB.
+2.  Open **[zales.github.io/sshdeck](https://zales.github.io/sshdeck/)** in Chrome or Edge.
+3.  Click **Install** and select the device port.
+
+### Method 2: PlatformIO (Developers)
 This project is built with **PlatformIO**.
 
 1.  **Clone the repository**:

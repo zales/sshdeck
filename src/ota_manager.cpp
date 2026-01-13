@@ -16,16 +16,22 @@ UpdateManifest OtaManager::fetchManifest(const String& manifestUrl, const String
     
     HTTPClient http;
     WiFiClientSecure* client = new WiFiClientSecure;
+    
     if(rootCaCert.length() > 0) {
         client->setCACert(rootCaCert.c_str());
     } else {
         client->setInsecure();
     }
+    client->setTimeout(10000); // 10s
     
     Serial.println("Fetching manifest: " + manifestUrl);
     
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    
+    // Attempt 1: Secure
     if (http.begin(*client, manifestUrl)) {
         int httpCode = http.GET();
+
         if (httpCode == HTTP_CODE_OK) {
             String payload = http.getString();
             Serial.println("Manifest payload: " + payload);
@@ -110,31 +116,34 @@ bool OtaManager::updateFromUrl(const String& url, const String& rootCaCert) {
     drawProgress(0, "Connecting...");
 
     HTTPClient http;
-    WiFiClientSecure *client = nullptr;
+    WiFiClientSecure *client = new WiFiClientSecure;
 
-    // If HTTPS and cert provided
-    if (url.startsWith("https://")) {
-        client = new WiFiClientSecure;
-        if (client) {
-            if (rootCaCert.length() > 0) {
-                client->setCACert(rootCaCert.c_str());
-            } else {
-                client->setInsecure();
-            }
-            http.begin(*client, url);
+    if (client) {
+        if (rootCaCert.length() > 0) {
+            client->setCACert(rootCaCert.c_str());
         } else {
-             // Fallback
-             http.begin(url);
+            client->setInsecure();
         }
+        client->setTimeout(12000); // Increase timeout
+    }
+
+    // Attempt 1
+    Serial.printf("OTA: Fetching %s\n", url.c_str());
+    
+    // Handle redirects?
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    
+    if (client) {
+        http.begin(*client, url);
     } else {
         http.begin(url);
     }
     
-    // Get headers to check for size/type
     const char * headerKeys[] = {"Content-Type"};
     http.collectHeaders(headerKeys, 1);
 
     int httpCode = http.GET();
+    
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("OTA: HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
         drawProgress(0, "HTTP Error " + String(httpCode));
@@ -264,6 +273,24 @@ String OtaManager::checkUpdateAvailable(const String& binUrl, const String& curr
     int httpCode = http.GET();
     String newVer = "";
     
+    // Retry Insecure on SSL failure
+    if (httpCode < 0 && rootCaCert.length() > 0) {
+        Serial.println("Check SSL Fail. Retrying Insecure...");
+        http.end();
+        if (client) delete client;
+        
+        client = new WiFiClientSecure;
+        client->setInsecure();
+        
+        // Re-init connection
+        if (verUrl.startsWith("https://")) {
+             http.begin(*client, verUrl);
+        } else {
+             http.begin(verUrl);
+        }
+        httpCode = http.GET();
+    }
+
     if (httpCode == HTTP_CODE_OK) {
         newVer = http.getString();
         newVer.trim(); // Remove whitespace/newlines

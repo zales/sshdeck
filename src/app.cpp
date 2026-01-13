@@ -158,7 +158,9 @@ void App::handleSystemUpdate() {
     String manifestUrl = url;
     manifestUrl.replace("firmware.bin", "firmware.json");
     
-    ui.drawMessage("Checking...", "v" + String(APP_VERSION));
+    String msg = String(APP_VERSION);
+    if (!msg.startsWith("v")) msg = "v" + msg;
+    ui.drawMessage("Checking...", msg);
     
     UpdateManifest manifest = ota.fetchManifest(manifestUrl, UPDATE_ROOT_CA);
     

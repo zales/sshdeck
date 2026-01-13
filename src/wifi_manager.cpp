@@ -303,9 +303,9 @@ bool WifiManager::tryConnect(const String& ssid, const String& pass) {
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     Serial.println("Waiting for NTP time sync: ");
     time_t nowSecs = time(nullptr);
-    // Wait up to 5s for time
+    // Wait up to 15s for time
     start = millis();
-    while (nowSecs < 8 * 3600 * 2 && millis() - start < 5000) {
+    while (nowSecs < 8 * 3600 * 2 && millis() - start < 15000) {
         delay(500);
         Serial.print(".");
         nowSecs = time(nullptr);
