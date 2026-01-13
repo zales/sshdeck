@@ -25,3 +25,4 @@
 *.bck
 *.backup
 *_backup.cpp
+include/secrets.h

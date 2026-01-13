@@ -298,6 +298,24 @@ bool WifiManager::tryConnect(const String& ssid, const String& pass) {
         }
         delay(500);
     }
+    
+    // Sync time for SSL verification
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    Serial.println("Waiting for NTP time sync: ");
+    time_t nowSecs = time(nullptr);
+    // Wait up to 5s for time
+    start = millis();
+    while (nowSecs < 8 * 3600 * 2 && millis() - start < 5000) {
+        delay(500);
+        Serial.print(".");
+        nowSecs = time(nullptr);
+    }
+    Serial.println();
+    struct tm timeinfo;
+    gmtime_r(&nowSecs, &timeinfo);
+    Serial.print("Current time: ");
+    Serial.println(asctime(&timeinfo));
+    
     return true;
 }
 

@@ -7,7 +7,7 @@
 #define PIN_BOOT_BUTTON 0
 
 App::App() 
-    : wifi(terminal, keyboard, display), ui(display), menu(nullptr), sshClient(nullptr), currentState(STATE_MENU), pwrBtnStart(0) {
+    : wifi(terminal, keyboard, display), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), pwrBtnStart(0) {
 }
 
 void App::setup() {
@@ -21,6 +21,8 @@ void App::setup() {
     wifi.setRenderCallback([this]() { this->drawTerminalScreen(); });
     wifi.connect(); 
     
+    ota.begin();
+
     serverManager.setSecurityManager(&security);
     serverManager.begin();
     menu = new MenuSystem(display, keyboard);
@@ -85,6 +87,7 @@ void App::initializeHardware() {
 }
 
 void App::loop() {
+    ota.loop();
     keyboard.loop();
     checkPowerButton();
 
@@ -139,6 +142,33 @@ void App::checkPowerButton() {
     } else {
         pwrBtnStart = 0;
     }
+}
+
+void App::handleSystemUpdate() {
+    if (WiFi.status() != WL_CONNECTED) {
+        ui.drawMessage("Error", "No WiFi Connection");
+        delay(2000);
+        return;
+    }
+
+    String url = UPDATE_SERVER_URL;
+    
+    ui.drawMessage("Checking...", "v" + String(APP_VERSION));
+    String newVer = ota.checkUpdateAvailable(url, APP_VERSION, UPDATE_ROOT_CA);
+    
+    if (newVer == "") {
+        // No update or error
+        // But maybe the user forced it? 
+        // Let's ask if they want to reinstall if version check failed or same version
+        std::vector<String> opts = {"Reinstall?", "Cancel"};
+        if (menu->showMenu("No pending update", opts) != 0) return;
+    } else {
+        String msg = "New: " + newVer;
+        std::vector<String> opts = {"Update", "Cancel"};
+        if (menu->showMenu(msg, opts) != 0) return;
+    }
+
+    ota.updateFromUrl(url, UPDATE_ROOT_CA);
 }
 
 void App::enterDeepSleep() {
@@ -500,6 +530,7 @@ void App::handleSettings() {
             "Change PIN",
             "WiFi Network",
             "Storage & Keys",
+            "System Update",
             "System Info",
             "Back"
         };
@@ -516,6 +547,9 @@ void App::handleSettings() {
              handleStorage();
         }
         else if (choice == 3) {
+             handleSystemUpdate();
+        }
+        else if (choice == 4) {
             String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Disconnected";
             String bat = String(getBatteryPercentage()) + "% (" + String(getBatteryVoltage()) + "V)";
             String ram = String(ESP.getFreeHeap() / 1024) + " KB";

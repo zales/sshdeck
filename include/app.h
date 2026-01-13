@@ -13,6 +13,7 @@
 #include "wifi_manager.h"
 #include "security_manager.h"
 #include "storage_manager.h"
+#include "ota_manager.h"
 
 enum AppState {
     STATE_MENU,
@@ -37,6 +38,7 @@ private:
     MenuSystem* menu;
     SSHClient* sshClient;
     SecurityManager security;
+    OtaManager ota;
 
     // State
     AppState currentState;
@@ -54,7 +56,7 @@ private:
     // UI & Logic
     void drawTerminalScreen();
     void showHelpScreen();
-    
+
     // Menu Handlers
     void handleMainMenu();
     void handleSavedServers();
@@ -62,9 +64,7 @@ private:
     void handleSettings();
     void handleChangePin();
     void handleStorage();
-    void exitStorageMode(); // Helper for clean exit/restart
+    void handleSystemUpdate();
+    void exitStorageMode();
     void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name);
 };
-
-    // Helper for Storage Exit
-    void exitStorageMode();
