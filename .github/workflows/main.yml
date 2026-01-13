@@ -64,7 +64,7 @@ jobs:
           grep '#define APP_VERSION' include/config.h | cut -d '"' -f 2 > web_flasher/firmware.txt
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v6
         with:
           name: firmware
           path: web_flasher/
@@ -78,7 +78,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Download Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v6
         with:
           name: firmware
           path: .
