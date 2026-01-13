@@ -129,6 +129,15 @@ jobs:
           name: firmware
           path: .
           
+      - name: Fix content structure
+        run: |
+          if [ -d "web_flasher" ]; then
+            echo "Moving content from web_flasher to root..."
+            cp -r web_flasher/* .
+            rm -rf web_flasher
+          fi
+          ls -R
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
         
