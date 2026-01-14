@@ -132,6 +132,10 @@ void TerminalEmulator::appendString(const char* str) {
     }
 }
 
+void TerminalEmulator::appendString(const String& str) {
+    appendString(str.c_str());
+}
+
 void TerminalEmulator::clear() {
     for (int i = 0; i < TERM_ROWS; i++) {
         term_lines[i][0] = '\0';

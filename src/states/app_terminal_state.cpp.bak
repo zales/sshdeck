@@ -11,7 +11,7 @@ void AppTerminalState::update(App& app) {
     // 1. Process ALL pending inputs at once to speed up typing
     // We check for keyboard availability directly to drain the buffer
     unsigned long startTime = millis();
-    while(app.keyboard().available() && (millis() - startTime < 10)) {
+    while(app.keyboard.available() && (millis() - startTime < 10)) {
         InputEvent event = app.pollInputs();
 
         if (event.type == EVENT_NONE) break;
@@ -21,9 +21,9 @@ void AppTerminalState::update(App& app) {
             return;
         }
 
-        if (app.sshClient() && app.sshClient()->isConnected()) {
+        if (app.sshClient && app.sshClient->isConnected()) {
             if (event.type == EVENT_KEY_PRESS && event.key != 0) {
-                app.sshClient()->write(event.key); // Send to network buffer
+                app.sshClient->write(event.key); // Send to network buffer
             }
         }
     }
@@ -34,9 +34,9 @@ void AppTerminalState::update(App& app) {
     // But pollInputs calls keyboard.loop().
     // Let's stick to the while loop above for fast typing, assuming polls are cheap.
 
-    if (app.sshClient() && app.sshClient()->isConnected()) {
+    if (app.sshClient && app.sshClient->isConnected()) {
         // 2. Read available SSH data (bulk read)
-        app.sshClient()->process();
+        app.sshClient->process();
         
         bool forceRedraw = false;
         // Battery Charging Animation (every 1 sec)
@@ -47,12 +47,12 @@ void AppTerminalState::update(App& app) {
         // Let's keep specific state logic here.
         static unsigned long lastAniUpdate = 0;
 
-        if (app.power().isCharging() && (millis() - lastAniUpdate > 1000)) {
+        if (app.power.isCharging() && (millis() - lastAniUpdate > 1000)) {
             lastAniUpdate = millis();
             forceRedraw = true;
         }
 
-        if (app.terminal().needsUpdate() || forceRedraw) {
+        if (app.terminal.needsUpdate() || forceRedraw) {
              // 3. Debounce Redraw
              // If data just arrived, wait a tiny bit to see if more is coming (Nagle-like)
              // But don't block. Just skip this frame if it's too soon since last meaningful data, UNLESS buffer is full.
@@ -73,10 +73,10 @@ void AppTerminalState::update(App& app) {
              app.drawTerminalScreen();
         }
 
-        if (!app.sshClient()->isConnected()) {
-            app.display().lock();
-            app.ui().drawMessage("Disconnected", "Session Ended");
-            app.display().unlock();
+        if (!app.sshClient->isConnected()) {
+            app.display.lock();
+            app.ui.drawMessage("Disconnected", "Session Ended");
+            app.display.unlock();
             
             delay(1000); // Give user time to see
             app.changeState(new AppMenuState());

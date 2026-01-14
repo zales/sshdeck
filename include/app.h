@@ -17,12 +17,15 @@
 #include "ota_manager.h"
 #include "power_manager.h"
 #include "app_state.h"
+#include "system_context.h"
+#include "controllers/settings_controller.h"
+#include "controllers/connection_controller.h"
 
 // Forward declare states
 class AppMenuState;
 class AppTerminalState;
 
-class App {
+class App : public ISystemContext {
 public:
     App();
     ~App();
@@ -32,35 +35,11 @@ public:
     // State Management
     void changeState(AppState* newState);
 
-    // Subsystems (Public for States)
-    DisplayManager display;
-    KeyboardManager keyboard;
-    UIManager ui;
-    TerminalEmulator terminal;
-    PowerManager power;
-    ServerManager serverManager;
-    StorageManager storage;
-    WifiManager wifi;
-    std::unique_ptr<MenuSystem> menu;
-    std::unique_ptr<SSHClient> sshClient;
-    SecurityManager security;
-    OtaManager ota;
-
-    
-    // State
-    std::unique_ptr<AppState> currentState;
-    unsigned long lastAniUpdate;
-    unsigned long lastScreenRefresh;
-    volatile bool refreshPending;
-
-public:
-
-    // Helper Methods
+    // Helpers
     void initializeHardware();
     void enterDeepSleep();
     void checkSystemInput();
 
-    void unlockSystem();
     void requestRefresh(); // Thread-safe refresh request
 
     // Event Loop Logic
@@ -71,15 +50,53 @@ public:
     void showHelpScreen();
 
     // Menu Handlers
-    void handleMainMenu();
-    void handleSavedServers();
-    void handleQuickConnect();
-    void handleSettings();
-    void handleBatteryInfo();
-    void handleChangePin();
-    void handleStorage();
-    void handleSystemUpdate();
-    void handleWifiMenu();
-    void exitStorageMode();
-    void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name);
+    void handleMainMenu() override;
+    void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name) override;
+
+    // Getters (ISystemContext implementation)
+    DisplayManager& display() override { return _display; }
+    KeyboardManager& keyboard() override { return _keyboard; }
+    UIManager& ui() override { return _ui; }
+    TerminalEmulator& terminal() override { return _terminal; }
+    PowerManager& power() override { return _power; }
+    ServerManager& serverManager() override { return _serverManager; }
+    StorageManager& storage() override { return _storage; }
+    WifiManager& wifi() override { return _wifi; }
+    MenuSystem* menu() override { return _menu.get(); }
+    SSHClient* sshClient() override { return _sshClient.get(); }
+    SecurityManager& security() override { return _security; }
+    OtaManager& ota() override { return _ota; }
+
+    SettingsController& settingsController() { return *_settingsController; }
+    ConnectionController& connectionController() { return *_connectionController; }
+
+    // Special setters for unique_ptrs
+    void resetMenu(MenuSystem* m) { _menu.reset(m); }
+    void resetSshClient(SSHClient* s) { _sshClient.reset(s); }
+
+private:
+    // Subsystems
+    DisplayManager _display;
+    KeyboardManager _keyboard;
+    UIManager _ui;
+    TerminalEmulator _terminal;
+    PowerManager _power;
+    ServerManager _serverManager;
+    StorageManager _storage;
+    WifiManager _wifi;
+    std::unique_ptr<MenuSystem> _menu;
+    std::unique_ptr<SSHClient> _sshClient;
+    SecurityManager _security;
+    OtaManager _ota;
+    
+    // Controllers
+    std::unique_ptr<SettingsController> _settingsController;
+    std::unique_ptr<ConnectionController> _connectionController;
+
+    // State
+    std::unique_ptr<AppState> _currentState;
+    AppState* _nextState; // Pending state transition
+    unsigned long _lastAniUpdate;
+    unsigned long _lastScreenRefresh;
+    volatile bool _refreshPending;
 };

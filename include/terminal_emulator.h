@@ -20,6 +20,7 @@ public:
     
     void appendChar(char c);
     void appendString(const char* str);
+    void appendString(const String& str);
     void clear();
     
     const char* getLine(int row) const;

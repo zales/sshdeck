@@ -4,7 +4,7 @@
 #include <algorithm>
 
 WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, UIManager& ui_mgr, PowerManager& pwr)
-    : terminal(term), keyboard(kb), ui(ui_mgr), power(pwr), security(nullptr) {
+    : terminal(term), keyboard(kb), ui(ui_mgr), power(pwr), security(nullptr), _lastStatus(WL_DISCONNECTED) {
 }
 
 void WifiManager::setSecurityManager(SecurityManager* sec) {
@@ -227,4 +227,36 @@ bool WifiManager::connect() {
         return connectTo(savedNetworks[lastUsedIndex].ssid, savedNetworks[lastUsedIndex].pass);
     }
     return false; // No auto-connect target
+}
+
+void WifiManager::connectAsync() {
+    loadCredentials();
+    if (lastUsedIndex >= 0 && lastUsedIndex < maxSavedIndex) {
+        String ssid = savedNetworks[lastUsedIndex].ssid;
+        String pass = savedNetworks[lastUsedIndex].pass;
+        if (ssid.length() > 0) {
+             WiFi.mode(WIFI_STA);
+             WiFi.setHostname("ssh-deck");
+             WiFi.setAutoReconnect(true);
+             WiFi.begin(ssid.c_str(), pass.c_str());
+             _lastStatus = WL_DISCONNECTED; // Reset status tracker
+        }
+    }
+}
+
+void WifiManager::loop() {
+    wl_status_t status = WiFi.status();
+    if (status != _lastStatus) {
+        if (status == WL_CONNECTED && _lastStatus != WL_CONNECTED) {
+            String ip = WiFi.localIP().toString();
+            String ssid = WiFi.SSID();
+            terminal.appendString("\r\n[WiFi] Connected to " + ssid + "\r\n[WiFi] IP: " + ip + "\r\n");
+            // Optionally force UI refresh via callback if set, but status bar updates automatically
+        } else if (status == WL_CONNECT_FAILED && _lastStatus != WL_CONNECT_FAILED) {
+            terminal.appendString("\r\n[WiFi] Connection Failed\r\n");
+        } else if (status == WL_DISCONNECTED && _lastStatus == WL_CONNECTED) {
+            terminal.appendString("\r\n[WiFi] Disconnected\r\n");
+        }
+        _lastStatus = status;
+    }
 }

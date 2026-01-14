@@ -22,7 +22,11 @@ public:
 
     // Attempt to connect using saved credentials (auto-connect)
     bool connect(); 
+    void connectAsync(); // Non-blocking auto-connect start
     
+    // Polling for async status updates
+    void loop();
+
     struct WifiScanResult {
         String ssid;
         int rssi;
@@ -71,5 +75,7 @@ private:
     WifiCreds savedNetworks[MAX_SAVED_NETWORKS];
     int maxSavedIndex = 0;
     int lastUsedIndex = -1;
+    
+    wl_status_t _lastStatus = WL_DISCONNECTED;
 };
 
