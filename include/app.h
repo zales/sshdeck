@@ -16,11 +16,11 @@
 #include "storage_manager.h"
 #include "ota_manager.h"
 #include "power_manager.h"
+#include "app_state.h"
 
-enum AppState {
-    STATE_MENU,
-    STATE_TERMINAL
-};
+// Forward declare states
+class AppMenuState;
+class AppTerminalState;
 
 class App {
 public:
@@ -29,8 +29,10 @@ public:
     void setup();
     void loop();
 
-private:
-    // Subsystems
+    // State Management
+    void changeState(AppState* newState);
+
+    // Subsystems (Public for States)
     DisplayManager display;
     KeyboardManager keyboard;
     UIManager ui;
@@ -44,25 +46,28 @@ private:
     SecurityManager security;
     OtaManager ota;
 
+    
     // State
-    AppState currentState;
+    std::unique_ptr<AppState> currentState;
     unsigned long lastAniUpdate;
     unsigned long lastScreenRefresh;
     volatile bool refreshPending;
+
+public:
 
     // Helper Methods
     void initializeHardware();
     void enterDeepSleep();
     void checkSystemInput();
+
     void unlockSystem();
     void requestRefresh(); // Thread-safe refresh request
 
     // Event Loop Logic
     InputEvent pollInputs();
-    void handleMainMenuSelection(int choice);
 
     // UI & Logic
-    void drawTerminalScreen();
+    void drawTerminalScreen(bool partial = true);
     void showHelpScreen();
 
     // Menu Handlers
@@ -74,6 +79,7 @@ private:
     void handleChangePin();
     void handleStorage();
     void handleSystemUpdate();
+    void handleWifiMenu();
     void exitStorageMode();
     void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name);
 };

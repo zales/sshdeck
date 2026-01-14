@@ -3,9 +3,11 @@
 #include <Wire.h>
 #include <driver/rtc_io.h>
 #include "board_def.h"
+#include "states/app_menu_state.h"
+#include "states/app_terminal_state.h"
 
 App::App() 
-    : wifi(terminal, keyboard, ui, power), ui(display), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0), refreshPending(false) {
+    : wifi(terminal, keyboard, ui, power), ui(display), ota(display), currentState(nullptr), lastAniUpdate(0), lastScreenRefresh(0), refreshPending(false) {
 }
 
 App::~App() {
@@ -29,6 +31,9 @@ void App::setup() {
     serverManager.begin();
     menu.reset(new MenuSystem(ui)); // Use reset for compatibility
     
+    // Initialize State Machine
+    changeState(new AppMenuState());
+
     Serial.println("Setup complete, entering menu...");
 }
 
@@ -102,13 +107,25 @@ InputEvent App::pollInputs() {
     return InputEvent();
 }
 
+void App::changeState(AppState* newState) {
+    if (currentState) {
+        currentState->exit(*this);
+    }
+    currentState.reset(newState);
+    if (currentState) {
+        currentState->enter(*this);
+    }
+}
+
 void App::loop() {
     ota.loop();
     
     // Process pending refresh requests (debounced)
     if (refreshPending) {
         refreshPending = false;
-        drawTerminalScreen();
+        if (currentState) {
+            currentState->onRefresh(*this);
+        }
     }
     
     // Status update logic
@@ -118,60 +135,9 @@ void App::loop() {
         lastStatusUpdate = millis();
     }
     
-    InputEvent event = pollInputs();
-    if (event.type == EVENT_SYSTEM && event.systemCode == SYS_EVENT_SLEEP) {
-        enterDeepSleep();
-        return;
-    }
-
-    if (currentState == STATE_MENU) {
-        if (!menu) {
-            Serial.println("FATAL: menu is NULL in STATE_MENU!");
-            ESP.restart();
-            return;
-        }
-        
-        if (!menu->isRunning()) {
-            handleMainMenu();
-        }
-        
-        if (menu->handleInput(event)) {
-             // UI updated internally
-        }
-        
-        if (!menu->isRunning() && menu->isConfirmed()) {
-             handleMainMenuSelection(menu->getSelection());
-        }
-    } else {
-        // STATE_TERMINAL
-        if (sshClient && sshClient->isConnected()) {
-            sshClient->process();
-            
-            // Forward input to SSH client
-            if (sshClient && event.type == EVENT_KEY_PRESS && event.key != 0) {
-                sshClient->write(event.key);
-            }
-            
-            bool forceRedraw = false;
-            // Battery Charging Animation (every 1 sec)
-            if (power.isCharging() && (millis() - lastAniUpdate > 1000)) {
-                lastAniUpdate = millis();
-                forceRedraw = true;
-            }
-
-            if ((terminal.needsUpdate() || forceRedraw) && (millis() - lastScreenRefresh > DISPLAY_UPDATE_INTERVAL_MS)) {
-                drawTerminalScreen();
-                lastScreenRefresh = millis();
-            }
-            if (!sshClient->isConnected()) {
-                currentState = STATE_MENU;
-                ui.drawMessage("Disconnected", "Session Ended");
-                delay(1000); // Give user time to see
-            }
-        } else {
-            currentState = STATE_MENU;
-        }
-        delay(5); 
+    // Delegate to Current State
+    if (currentState) {
+        currentState->update(*this);
     }
 }
 
@@ -182,85 +148,80 @@ void App::handleMainMenu() {
         "Settings",
         "Power Off"
     };
-    menu->showMenu("Main Menu", items);
-}
-
-void App::handleMainMenuSelection(int choice) {
-    if (choice == 0) {
-        handleSavedServers();
-    } else if (choice == 1) {
-        handleQuickConnect();
-    } else if (choice == 2) {
-        handleSettings();
-    } else if (choice == 3) {
-        enterDeepSleep();
-    }
+    menu->showMenu("Main Menu", items, [this](int choice) {
+        if (choice == 0) handleSavedServers();
+        else if (choice == 1) handleQuickConnect();
+        else if (choice == 2) handleSettings();
+        else if (choice == 3) enterDeepSleep();
+    });
 }
 
 
 void App::handleSystemUpdate() {
     if (WiFi.status() != WL_CONNECTED) {
-        ui.drawMessage("Error", "No WiFi Connection");
-        delay(2000);
+        menu->showMessage("Error", "No WiFi Connection", [this](){ handleSettings(); });
         return;
     }
-
-    String url = UPDATE_SERVER_URL; 
-    // If URL ends in .bin, we try to find a manifest .json instead if user wants full list
-    // Or we simply define MANIFEST_URL in config. 
-    // For now, let's construct manifest URL from base if possible, or just hardcode convention.
-    String manifestUrl = url;
-    manifestUrl.replace("firmware.bin", "firmware.json");
     
+    // Show spinner/message then work
     String msg = String(APP_VERSION);
     if (!msg.startsWith("v")) msg = "v" + msg;
-    ui.drawMessage("Checking...", msg);
+    menu->showMessage("Checking...", msg);
     
-    UpdateManifest manifest = ota.fetchManifest(manifestUrl, UPDATE_ROOT_CA);
-    
-    if (manifest.versions.empty()) {
-         // Fallback to legacy check if manifest request failed
-         String newVer = ota.checkUpdateAvailable(url, APP_VERSION, UPDATE_ROOT_CA);
-         if (newVer == "") {
-            std::vector<String> opts = {"Reinstall?", "Cancel"};
-            if (menu->showMenuBlocking("No update found", opts, keyboard) != 0) return;
-            ota.updateFromUrl(url, UPDATE_ROOT_CA);
+    // Perform work in next loop iteration
+    menu->setOnLoop([this]() {
+         menu->setOnLoop(nullptr); // Run once
+
+         String url = UPDATE_SERVER_URL; 
+         String manifestUrl = url;
+         manifestUrl.replace("firmware.bin", "firmware.json");
+         
+         UpdateManifest manifest = ota.fetchManifest(manifestUrl, UPDATE_ROOT_CA);
+         
+         if (manifest.versions.empty()) {
+             // Fallback to legacy check
+             String newVer = ota.checkUpdateAvailable(url, APP_VERSION, UPDATE_ROOT_CA);
+             if (newVer == "") {
+                std::vector<String> opts = {"Reinstall?", "Cancel"};
+                menu->showMenu("No update found", opts, [this, url](int c){
+                    if(c==0) ota.updateFromUrl(url, UPDATE_ROOT_CA);
+                    else handleSettings();
+                }, [this](){ handleSettings(); });
+             } else {
+                 ota.updateFromUrl(url, UPDATE_ROOT_CA);
+             }
          } else {
-             // Logic for simple update
-             ota.updateFromUrl(url, UPDATE_ROOT_CA);
+            // Show version selection menu
+            auto versions = std::make_shared<std::vector<FirmwareVersion>>(manifest.versions);
+            std::vector<String> options;
+            std::vector<String> urls;
+            
+            for (const auto& v : *versions) {
+                String label = v.version;
+                if (v.version == String(APP_VERSION)) label += " (Curr)";
+                if (v.version == manifest.latestVersion) label += " *";
+                options.push_back(label);
+            }
+            
+            menu->showMenu("Select Version", options, [this, versions](int selected){
+                 if (selected < 0 || selected >= (int)versions->size()) return;
+                 
+                 String targetUrl = (*versions)[selected].url;
+                 String targetVer = (*versions)[selected].version;
+                 
+                 std::vector<String> confirmOpts = {"Yes, Flash it", "No"};
+                 menu->showMenu("Flash v" + targetVer + "?", confirmOpts, [this, targetUrl](int c){
+                     if(c==0) {
+                         ota.updateFromUrl(targetUrl, UPDATE_ROOT_CA);
+                         // if update fails
+                         menu->showMessage("Error", "Update Failed", [this](){ handleSettings(); });
+                     } else {
+                         handleSettings();
+                     }
+                 }, [this](){ handleSystemUpdate(); });
+            }, [this](){ handleSettings(); });
          }
-         return;
-    }
-
-    // Show version selection menu
-    std::vector<String> options;
-    std::vector<String> urls;
-    
-    for (const auto& v : manifest.versions) {
-        String label = v.version;
-        if (v.version == String(APP_VERSION)) label += " (Curr)";
-        if (v.version == manifest.latestVersion) label += " *";
-        options.push_back(label);
-        urls.push_back(v.url);
-    }
-    options.push_back("Back");
-
-    while (true) {
-        int selected = menu->showMenuBlocking("Select Version", options, keyboard);
-        if (selected < 0 || selected >= urls.size()) return; // Back or cancelled
-
-        String targetUrl = urls[selected];
-        String targetVer = manifest.versions[selected].version;
-        
-        // Confirmation
-        std::vector<String> confirmOpts = {"Yes, Flash it", "No"};
-        if (menu->showMenuBlocking("Flash v" + targetVer + "?", confirmOpts, keyboard) == 0) {
-            ota.updateFromUrl(targetUrl, UPDATE_ROOT_CA);
-            // If update fails, it returns here
-            ui.drawMessage("Error", "Update Failed");
-            delay(2000);
-        }
-    }
+    });
 }
 
 void App::enterDeepSleep() {
@@ -301,7 +262,7 @@ void App::requestRefresh() {
     refreshPending = true;
 }
 
-void App::drawTerminalScreen() {
+void App::drawTerminalScreen(bool partial) {
     // Thread-safe display update with mutex
     if (displayMutex && xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100))) {
         // Construct Title for status bar
@@ -320,7 +281,7 @@ void App::drawTerminalScreen() {
             title += host;
         }
 
-        ui.drawTerminal(terminal, title, power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
+        ui.drawTerminal(terminal, title, power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED, partial);
         terminal.clearUpdateFlag();
         
         xSemaphoreGive(displayMutex);
@@ -344,14 +305,18 @@ void App::showHelpScreen() {
 }
 
 void App::connectToServer(const String& host, int port, const String& user, const String& pass, const String& name) {
-    terminal.clear();
-    terminal.appendString(("Connecting to " + name + "...\n").c_str());
+    // Show connecting message first (non-blocking render, but next steps might block network)
+    // We can't easily make LibSSH non-blocking in this codebase without major rewrite.
+    // So we accept that the UI freezes during "Connecting..."
+    
+    ui.drawMessage("Connecting...", "To: " + name); 
+    // Force display update since we might block immediately after
     
     // unique_ptr automatically deletes the old object when assigned a new one
     sshClient.reset(new SSHClient(terminal, keyboard));
     
     if (!sshClient) {
-        terminal.appendString("ERROR: Failed to allocate SSH client\n");
+        menu->showMessage("Error", "Alloc Failed", [this](){ handleMainMenu(); });
         return;
     }
     // Use lambdas for callbacks
@@ -366,7 +331,7 @@ void App::connectToServer(const String& host, int port, const String& user, cons
                 }
             });
             if (!wifi.connect()) {
-                menu->showMessageBlocking("Error", "WiFi Failed", keyboard);
+                menu->showMessage("Error", "WiFi Failed", [this](){ handleMainMenu(); });
                 return;
             }
     }
@@ -375,117 +340,125 @@ void App::connectToServer(const String& host, int port, const String& user, cons
     const char* keyData = (privKey.length() > 0) ? privKey.c_str() : nullptr;
 
     if (sshClient->connectSSH(host.c_str(), port, user.c_str(), pass.c_str(), keyData)) {
-        currentState = STATE_TERMINAL;
+        changeState(new AppTerminalState());
     } else {
-            // Append instruction to terminal log
-            terminal.appendString("\n[Press any key to Exit]");
-            
-            // Ensure the last log messages are visible
-            drawTerminalScreen();
-            
-            // 1. Clear any buffered/lingering keystrokes from the selection action
-            unsigned long clearStart = millis();
-            while (millis() - clearStart < 500) { 
-                if (keyboard.isKeyPressed()) keyboard.getKeyChar();
-                delay(10);
-            }
-            
-            // 2. Wait for a NEW explicit key press
-            while(!keyboard.isKeyPressed()) {
-                delay(10);
-            }
-            keyboard.getKeyChar(); // consume key
-
-            // Optional: Don't show the "Error" popup if the log was informative enough?
-            // But keeping it for consistency.
-            menu->showMessageBlocking("Error", "SSH Failed", keyboard);
+         // Connection failed
+         // Just show message, on dismiss go to main menu
+         menu->showMessage("Error", "SSH Failed", [this](){ handleMainMenu(); });
     }
 }
 
 void App::handleSavedServers() {
-    while (true) {
-        std::vector<String> items;
-        for (const auto& s : serverManager.getServers()) {
-            items.push_back(s.name);
-        }
-        items.push_back("[ Add New Server ]");
-
-        int choice = menu->showMenuBlocking("Saved Servers", items, keyboard);
-        
-        if (choice < 0) return; // Back
-        
-        if (choice == items.size() - 1) {
-            ServerConfig newSrv;
-            String p = "22";
-            if (menu->textInputBlocking("Name", newSrv.name, keyboard) && 
-                menu->textInputBlocking("Host", newSrv.host, keyboard) &&
-                menu->textInputBlocking("User", newSrv.user, keyboard) &&
-                menu->textInputBlocking("Port", p, keyboard) &&
-                menu->textInputBlocking("Password", newSrv.password, keyboard)) {
-                    newSrv.port = p.toInt();
-                    serverManager.addServer(newSrv);
-            }
-        } else {
-            ServerConfig selected = serverManager.getServer(choice);
-            std::vector<String> actions = {"Connect", "Edit", "Delete"};
-            int action = menu->showMenuBlocking(selected.name, actions, keyboard);
-
-            if (action == 0) { // Connect
-                connectToServer(selected.host, selected.port, selected.user, selected.password, selected.name);
-                return;
-            } else if (action == 1) { // Edit
-                 String p = String(selected.port);
-                 menu->textInputBlocking("Name", selected.name, keyboard);
-                 menu->textInputBlocking("Host", selected.host, keyboard);
-                 menu->textInputBlocking("User", selected.user, keyboard);
-                 menu->textInputBlocking("Port", p, keyboard);
-                 selected.port = p.toInt();
-                 menu->textInputBlocking("Password", selected.password, keyboard);
-                 serverManager.updateServer(choice, selected);
-            } else if (action == 2) { // Delete
-                 std::vector<String> yn = {"No", "Yes"};
-                 if (menu->showMenuBlocking("Delete?", yn, keyboard) == 1) {
-                    serverManager.removeServer(choice);
-                 }
-            }
-        }
+    std::vector<String> items;
+    auto servers = serverManager.getServers();
+    for (const auto& s : servers) {
+        items.push_back(s.name);
     }
+    items.push_back("[ Add New Server ]");
+
+    menu->showMenu("Saved Servers", items, [this, servers](int choice) {
+        if (choice >= (int)servers.size()) {
+            // Add New Server Wizard
+            auto newSrv = std::make_shared<ServerConfig>();
+            newSrv->port = 22;
+            
+            menu->showInput("Name", "", false, [this, newSrv](String val) {
+                newSrv->name = val;
+                menu->showInput("Host", "", false, [this, newSrv](String val) {
+                    newSrv->host = val;
+                    menu->showInput("User", "", false, [this, newSrv](String val) {
+                        newSrv->user = val;
+                        menu->showInput("Port", "22", false, [this, newSrv](String val) {
+                            newSrv->port = val.toInt();
+                            menu->showInput("Password", "", true, [this, newSrv](String val) {
+                                newSrv->password = val;
+                                serverManager.addServer(*newSrv);
+                                handleSavedServers();
+                            }, [this](){ handleSavedServers(); });
+                        }, [this](){ handleSavedServers(); });
+                    }, [this](){ handleSavedServers(); });
+                }, [this](){ handleSavedServers(); });
+            }, [this](){ handleSavedServers(); });
+            
+        } else {
+            // Selected existing server
+            ServerConfig selected = servers[choice];
+            std::vector<String> actions = {"Connect", "Edit", "Delete"};
+            
+            // Nested Menu for Actions
+            menu->showMenu(selected.name, actions, [this, choice, selected](int action) {
+                if (action == 0) { // Connect
+                    connectToServer(selected.host, selected.port, selected.user, selected.password, selected.name);
+                } else if (action == 1) { // Edit
+                    auto srv = std::make_shared<ServerConfig>(selected);
+                    menu->showInput("Name", srv->name, false, [this, choice, srv](String val) {
+                        srv->name = val;
+                        menu->showInput("Host", srv->host, false, [this, choice, srv](String val) {
+                            srv->host = val;
+                            menu->showInput("User", srv->user, false, [this, choice, srv](String val) {
+                                srv->user = val;
+                                menu->showInput("Port", String(srv->port), false, [this, choice, srv](String val) {
+                                    srv->port = val.toInt();
+                                    menu->showInput("Password", srv->password, true, [this, choice, srv](String val) {
+                                        srv->password = val;
+                                        serverManager.updateServer(choice, *srv);
+                                        handleSavedServers();
+                                    }, [this](){ handleSavedServers(); });
+                                }, [this](){ handleSavedServers(); });
+                            }, [this](){ handleSavedServers(); });
+                        }, [this](){ handleSavedServers(); });
+                    }, [this](){ handleSavedServers(); });
+                } else if (action == 2) { // Delete
+                     std::vector<String> yn = {"No", "Yes"};
+                     menu->showMenu("Delete?", yn, [this, choice](int ynChoice) {
+                        if (ynChoice == 1) {
+                            serverManager.removeServer(choice);
+                        }
+                        handleSavedServers();
+                     }, [this](){ handleSavedServers(); });
+                }
+            }, [this](){ handleSavedServers(); });
+        }
+    }, [this]() {
+        handleMainMenu();
+    });
 }
 
 void App::handleQuickConnect() {
-     ServerConfig s;
-     s.name = "Quick Connect";
-     s.port = 22;
-     String p = "22";
+     auto s = std::make_shared<ServerConfig>();
+     s->name = "Quick Connect";
+     s->port = 22;
      
-     if (menu->textInputBlocking("Host / IP", s.host, keyboard) &&
-         menu->textInputBlocking("Port", p, keyboard) &&
-         menu->textInputBlocking("User", s.user, keyboard) &&
-         menu->textInputBlocking("Password", s.password, keyboard, true)) {
-             s.port = p.toInt();
-             connectToServer(s.host, s.port, s.user, s.password, s.name);
-     }
+     menu->showInput("Host / IP", s->host, false, [this, s](String val) {
+         s->host = val;
+         menu->showInput("Port", "22", false, [this, s](String val) {
+             s->port = val.toInt();
+             menu->showInput("User", s->user, false, [this, s](String val) {
+                 s->user = val;
+                 menu->showInput("Password", s->password, true, [this, s](String val) {
+                     s->password = val;
+                     connectToServer(s->host, s->port, s->user, s->password, s->name);
+                 }, [this](){ handleMainMenu(); });
+             }, [this](){ handleMainMenu(); });
+         }, [this](){ handleMainMenu(); });
+     }, [this](){ handleMainMenu(); });
 }
 
 void App::handleSettings() {
-    while(true) {
-        std::vector<String> items = {
-            "Change PIN",
-            "WiFi Network",
-            "Storage & Keys",
-            "System Update",
-            "System Info",
-            "Battery Info",
-            "Back"
-        };
-        int choice = menu->showMenuBlocking("Settings", items, keyboard);
-        
+    std::vector<String> items = {
+        "Change PIN",
+        "WiFi Network",
+        "Storage & Keys",
+        "System Update",
+        "System Info",
+        "Battery Info"
+    };
+    menu->showMenu("Settings", items, [this](int choice) {
         if (choice == 0) {
             handleChangePin();
         } 
         else if (choice == 1) {
-             wifi.setIdleCallback([this]() { this->checkSystemInput(); });
-             wifi.manage();
+             handleWifiMenu();
         } 
         else if (choice == 2) {
              handleStorage();
@@ -494,74 +467,59 @@ void App::handleSettings() {
              handleSystemUpdate();
         }
         else if (choice == 4) {
-            String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Disconnected";
-            String bat = String(power.getPercentage()) + "% (" + String(power.getVoltage()) + "V)";
-            String ram = String(ESP.getFreeHeap() / 1024) + " KB";
-            
-            ui.drawSystemInfo(ip, bat, ram, WiFi.macAddress());
-            
-            keyboard.clearBuffer();
-            while(!keyboard.isKeyPressed()) {
-                if (wifi.getIdleCallback()) wifi.getIdleCallback()(); 
-                delay(50);
-            }
-            keyboard.getKeyChar(); // consume the key
+             // System Info
+             String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Disconnected";
+             String bat = String(power.getPercentage()) + "% (" + String(power.getVoltage()) + "V)";
+             String ram = String(ESP.getFreeHeap() / 1024) + " KB";
+             String msg = "IP: " + ip + "\nBat: " + bat + "\nRAM: " + ram + "\nMAC: " + WiFi.macAddress();
+             
+             menu->showMessage("System Info", msg, [this](){ handleSettings(); });
         }
         else if (choice == 5) {
             handleBatteryInfo();
         }
-        else {
-            return;
-        }
-    }
+    }, [this]() {
+        handleMainMenu();
+    });
 }
 
 void App::handleChangePin() {
-    String newPin = "";
-    
-    // 1. Enter New PIN
-    while (true) {
-        ui.drawPinEntry("CHANGE PIN", "Enter New PIN:", newPin);
-        while(!keyboard.available()) { delay(10); checkSystemInput(); }
-        char key = keyboard.getKeyChar();
-        if (key == '\n' || key == '\r') { if (newPin.length() > 0) break; }
-        else if (key == 0x08) { if (newPin.length() > 0) newPin.remove(newPin.length()-1); }
-        else if (key >= 32 && key <= 126) newPin += key;
-    }
-    
-    // 2. Confirm
-    String confirmPin = "";
-    while (true) {
-        ui.drawPinEntry("CHANGE PIN", "Confirm New PIN:", confirmPin);
-        while(!keyboard.available()) { delay(10); checkSystemInput(); }
-        char key = keyboard.getKeyChar();
-        if (key == '\n' || key == '\r') { if (confirmPin.length() > 0) break; }
-        else if (key == 0x08) { if (confirmPin.length() > 0) confirmPin.remove(confirmPin.length()-1); }
-        else if (key >= 32 && key <= 126) confirmPin += key;
-    }
-    
-    if (newPin != confirmPin) {
-        ui.drawMessage("Error", "PIN Mismatch");
-        return;
-    }
-    
-    // 3. Re-Encrypt
-    ui.drawMessage("Processing", "Re-encrypting data...");
-    
-    // Decrypt SSH key with old PIN before changing it
-    String sshKey = security.getSSHKey();
+    menu->showInput("CHANGE PIN", "", true, [this](String newPin) {
+        if (newPin.length() == 0) {
+            handleSettings(); // Abort
+            return;
+        }
+        menu->showInput("CONFIRM PIN", "", true, [this, newPin](String confirmPin) {
+            if (newPin != confirmPin) {
+                menu->showMessage("Error", "PIN Mismatch", [this](){ handleSettings(); });
+                return;
+            }
+            
+            // Perform Encryption
+            menu->showMessage("Processing", "Re-encrypting...");
+            // Force a draw update immediately? 
+            // In non-blocking, we might need to yield or run this in next loop.
+            // But encryption is blocking anyway.
+            
+            // Decrypt SSH key with old PIN before changing it
+            // Wait, we don't know the old PIN here? 
+            // security.getSSHKey() uses internal cached key if unlocked?
+            // Assuming security manager handles state.
+            String sshKey = security.getSSHKey();
+        
+            security.changePin(newPin); // Updates AES key
+            
+            serverManager.reEncryptAll();
+            wifi.reEncryptAll();
+            
+            if (sshKey.length() > 0) {
+                security.saveSSHKey(sshKey);
+            }
+        
+            menu->showMessage("Success", "PIN Changed!", [this](){ handleSettings(); });
 
-    security.changePin(newPin); // Updates AES key
-    
-    serverManager.reEncryptAll();
-    wifi.reEncryptAll();
-    
-    // Re-save SSH key with new PIN
-    if (sshKey.length() > 0) {
-        security.saveSSHKey(sshKey);
-    }
-
-    ui.drawMessage("Success", "PIN Changed!");
+        }, [this](){ handleSettings(); });
+    }, [this](){ handleSettings(); });
 }
 
 void App::unlockSystem() {
@@ -602,68 +560,58 @@ void App::handleStorage() {
     // 1. Automatically activate USB Mode on entry
     bool usbActive = storage.startUSBMode();
     
-    // Lambda for checking eject in blocking menu
-    auto storageIdle = [this]() {
-        this->checkSystemInput();
-        if (storage.isEjectRequested()) {
-            storage.clearEjectRequest();
-             ui.drawMessage("DISCONNECTED", "Safe to remove");
-             delay(1000);
-             exitStorageMode();
+    auto showStorageMenu = [this, usbActive]() {
+        std::vector<String> items = {
+            "Scan USB Disk",
+            "Import from SD"
+        };
+        
+        String title = usbActive ? "Storage (USB ON)" : "Storage (No USB)";
+        menu->showMenu(title, items, [this, usbActive](int choice) {
+             if (choice == 0) { // Scan USB
+                 menu->showMessage("Scanning...", "Checking Disk...", [this, usbActive](){ 
+                     String key = storage.scanRAMDiskForKey();
+                     if (key.length() > 20 && key.startsWith("-----BEGIN")) {
+                         security.saveSSHKey(key);
+                         menu->showMessage("Success", "Key Imported!", [this](){ exitStorageMode(); });
+                     } else {
+                         menu->showMessage("Failed", "Key not found.", [this](){ handleStorage(); /* recurses/refreshes */ });
+                     }
+                 });
+             } else if (choice == 1) { // SD Import
+                 String key = storage.readSSHKey("/id_rsa");
+                 if (key.length() > 20 && key.startsWith("-----BEGIN")) {
+                     security.saveSSHKey(key);
+                     menu->showMessage("Success", "Key Imported!", [this](){ handleStorage(); });
+                 } else {
+                     menu->showMessage("Error", "Invalid/Missing Key", [this](){ handleStorage(); });
+                 }
+             }
+        }, [this, usbActive]() {
+            // Back
+            if (usbActive) {
+                exitStorageMode();
+            } else {
+                handleSettings();
+            }
+        });
+
+        if (usbActive) {
+            menu->setOnLoop([this](){
+                if (storage.isEjectRequested()) {
+                    storage.clearEjectRequest();
+                     menu->showMessage("DISCONNECTED", "Safe to remove", [this](){
+                         exitStorageMode();
+                     });
+                }
+            });
         }
     };
 
     if (usbActive) {
-        ui.drawMessage("USB Active", "Connect to PC\nCopy id_rsa");
-        delay(1500); 
+        menu->showMessage("USB Active", "Connect to PC\nCopy id_rsa", showStorageMenu);
     } else {
-        ui.drawMessage("Warning", "USB Init Failed");
-        delay(1000);
-    }
-
-    while(true) {
-        std::vector<String> items = {
-            "Scan USB Disk",
-            "Import from SD",
-            "Back"
-        };
-        
-        String title = storage.isUSBActive() ? "Storage (USB ON)" : "Storage (No USB)";
-        int choice = menu->showMenuBlocking(title, items, keyboard, storageIdle);
-        
-        if (choice == 0) { // Scan USB
-             ui.drawMessage("Scanning...", "Checking Disk...");
-             String key = storage.scanRAMDiskForKey();
-             
-             if (key.length() > 20 && key.startsWith("-----BEGIN")) {
-                 security.saveSSHKey(key);
-                 ui.drawMessage("Success", "Key Imported!");
-                 delay(1500);
-                 
-                 exitStorageMode();
-                 return; // Exit menu/Restart
-             } else {
-                 ui.drawMessage("Failed", "Key not found.\nTry copying again.");
-                 delay(2000);
-             }
-             
-        } else if (choice == 1) { // SD Import
-             String key = storage.readSSHKey("/id_rsa");
-             if (key.length() > 20 && key.startsWith("-----BEGIN")) {
-                 security.saveSSHKey(key);
-                 ui.drawMessage("Success", "Key Imported!");
-                 delay(1000);
-             } else {
-                 ui.drawMessage("Error", "Invalid/Missing Key");
-                 delay(1000);
-             }
-        } else { // Back
-            // 3. Deactivate on exit
-            if (usbActive) {
-                exitStorageMode();
-            }
-            return;
-        }
+        menu->showMessage("Warning", "USB Init Failed", showStorageMenu);
     }
 }
 
@@ -677,50 +625,174 @@ void App::exitStorageMode() {
 }
 
 void App::handleBatteryInfo() {
-    // 0. Use new helper to clear buffer
-    keyboard.clearBuffer(500);
+    auto getBatteryMsg = [this]() -> String {
+         BatteryStatus status = power.getStatus();
+         String msg = "";
+         msg += "Src: " + status.powerSource + "\n";
+         msg += "Bat: " + String(status.percentage) + "% " + String(status.voltage) + "V\n";
+         if (status.voltage > 0) { // If fuel gauge active
+             msg += "Cur: " + String(status.currentMa) + " mA\n";
+             msg += "Cap: " + String(status.remainingCap) + " / " + String(status.fullCap) + "\n";
+             msg += "Hlth: " + String(status.soh) + "% Cyc: " + String(status.cycles) + "\n";
+             msg += "Tmp: " + String(status.temperature, 1) + " C";
+         }
+         return msg;
+    };
 
-    while (true) {
-        BatteryStatus status = power.getStatus();
+    // Initial Full Refresh
+    menu->showMessage("BATTERY STATUS", getBatteryMsg(), [this](){ handleSettings(); });
 
-        // --- Render using new UILayout System ---
-        ui.render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
-             UILayout layout(ui, "BATTERY STATUS");
-             
-             char buf[64];
-             
-             sprintf(buf, "Src: %s", status.powerSource.c_str());
-             layout.addText(buf);
-             
-             sprintf(buf, "Bat: %d%% (%.2fV)", status.percentage, status.voltage);
-             layout.addText(buf);
-             
-             if (status.voltage > 0) {                 
-                 sprintf(buf, "Cur: %d mA", status.currentMa);
-                 layout.addText(buf);
-
-                 sprintf(buf, "Cap: %d / %d", status.remainingCap, status.fullCap);
-                 layout.addText(buf);
-                 
-                 sprintf(buf, "Hlth: %d%% Cyc: %d", status.soh, status.cycles);
-                 layout.addText(buf);
-
-                 sprintf(buf, "Tmp: %.1f C", status.temperature);
-                 layout.addText(buf);
-             } 
-             
-             layout.addFooter("[ Press Key to Exit ]");
-        });
-        
-        // 500ms Refresh Rate
-        unsigned long start = millis();
-        while (millis() - start < 500) {
-            if (keyboard.isKeyPressed()) {
-                keyboard.getKeyChar(); // consume
-                return;
-            }
-            delay(10);
+    // Loop for Partial Updates
+    menu->setOnLoop([this, getBatteryMsg](){
+        static unsigned long lastUp = 0;
+        if (millis() - lastUp > 1000) {
+            lastUp = millis();
+            menu->updateMessage(getBatteryMsg());
         }
-    }
+    });
 }
 
+void App::handleWifiMenu() {
+    std::vector<String> items;
+    
+    bool connected = (WiFi.status() == WL_CONNECTED);
+    if (connected) {
+        items.push_back("Disconnect: " + WiFi.SSID());
+    }
+    items.push_back("Scan Networks");
+    items.push_back("Saved Networks");
+    items.push_back("Manual Connect");
+
+    menu->showMenu("WiFi Manager", items, [this, connected](int choice) {
+        // Adjust index based on dynamic items
+        int scanIdx = connected ? 1 : 0;
+        int savedIdx = connected ? 2 : 1;
+        int manIdx = connected ? 3 : 2;
+
+        if (connected && choice == 0) {
+            WiFi.disconnect();
+            menu->showMessage("WiFi", "Disconnected", [this](){ handleWifiMenu(); });
+            return;
+        }
+
+        if (choice == scanIdx) {
+            menu->showMessage("WiFi", "Scanning Networks...", nullptr);
+             
+            // Auto-start scan in next loop (no wait for key)
+            menu->setOnLoop([this](){
+                 menu->setOnLoop(nullptr); 
+                 
+                 // Small delay to ensure "Scanning..." is rendered if we came from another view
+                 // (Though Loop architecture usually renders before next update/input poll)
+                 
+                 auto networks = wifi.scan(); // returns vector<WifiScanResult>
+                 
+                 if (networks.empty()) {
+                     menu->showMessage("Scan", "No networks found", [this](){ handleWifiMenu(); });
+                     return;
+                 }
+                 
+                 std::vector<String> labels;
+                 for(const auto& net : networks) {
+                     String label = net.ssid;
+                     
+                     // Pad SSID up to 14 chars
+                     while(label.length() < 14) label += " ";
+                     if(label.length() > 14) label = label.substring(0, 14);
+                     
+                     // Lock icon
+                     label += (net.secure ? "*" : " ");
+                     label += " ";
+                     
+                     // RSSI Bars
+                     if (net.rssi > -60) label += "[====]";
+                     else if (net.rssi > -70) label += "[=== ]";
+                     else if (net.rssi > -80) label += "[==  ]";
+                     else label += "[=   ]";
+                     
+                     labels.push_back(label);
+                 }
+                 
+                 menu->showMenu("Scan Results", labels, [this, networks](int idx) {
+                         if (idx < 0 || idx >= (int)networks.size()) return;
+
+                         String ssid = networks[idx].ssid;
+                         
+                         // Check if known
+                         auto saved = wifi.getSavedNetworks();
+                         String existingPass = "";
+                         for(auto& s : saved) {
+                             if(s.ssid == ssid) {
+                                 existingPass = s.pass;
+                                 break;
+                             }
+                         }
+
+                         menu->showInput("Password", existingPass, true, [this, ssid](String pass) {
+                             menu->showMessage("Connecting", "Please wait...", nullptr);
+                             menu->setOnLoop([this, ssid, pass](){
+                                 menu->setOnLoop(nullptr);
+                                 if (wifi.connectTo(ssid, pass)) {
+                                     wifi.save(ssid, pass);
+                                     menu->showMessage("Success", "Connected!", [this](){ handleWifiMenu(); });
+                                 } else {
+                                     menu->showMessage("Error", "Connection Failed", [this](){ handleWifiMenu(); });
+                                 }
+                             });
+                         }, [this](){ handleWifiMenu(); });
+                     }, [this](){ handleWifiMenu(); });
+                 });
+            }
+        else if (choice == savedIdx) {
+            auto saved = wifi.getSavedNetworks();
+            if (saved.empty()) {
+                menu->showMessage("Saved", "No saved networks", [this](){ handleWifiMenu(); });
+                return;
+            }
+            std::vector<String> labels;
+            for(auto& s : saved) labels.push_back(s.ssid);
+            
+            menu->showMenu("Saved Networks", labels, [this, saved](int idx) {
+                String ssid = saved[idx].ssid;
+                std::vector<String> opt = {"Connect", "Forget"};
+                menu->showMenu(ssid, opt, [this, ssid, idx](int action){
+                    if(action == 0) { // Connect
+                        menu->showMessage("Connecting", "Please wait...", nullptr);
+                        menu->setOnLoop([this, ssid, idx](){
+                             menu->setOnLoop(nullptr);
+                             auto savedFresh = wifi.getSavedNetworks();
+                             if (idx < savedFresh.size()) {
+                                 if(wifi.connectTo(savedFresh[idx].ssid, savedFresh[idx].pass)) {
+                                      menu->showMessage("Success", "Connected!", [this](){ handleWifiMenu(); });
+                                 } else {
+                                      menu->showMessage("Error", "Failed", [this](){ handleWifiMenu(); });
+                                 }
+                             } else {
+                                 handleWifiMenu();
+                             }
+                        });
+                    } else { // Forget
+                        wifi.forget(idx);
+                        menu->showMessage("WiFi", "Network Forgotten", [this](){ handleWifiMenu(); });
+                    }
+                }, [this](){ handleWifiMenu(); });
+            }, [this](){ handleWifiMenu(); });
+        }
+        else if (choice == manIdx) {
+            menu->showInput("SSID", "", false, [this](String ssid){
+                menu->showInput("Password", "", true, [this, ssid](String pass){
+                     menu->showMessage("Connecting", "Please wait...", nullptr);
+                     menu->setOnLoop([this, ssid, pass](){
+                         menu->setOnLoop(nullptr);
+                         if (wifi.connectTo(ssid, pass)) {
+                             wifi.save(ssid, pass);
+                             menu->showMessage("Success", "Connected!", [this](){ handleWifiMenu(); });
+                         } else {
+                             menu->showMessage("Error", "Connection Failed", [this](){ handleWifiMenu(); });
+                         }
+                     });
+                }, [this](){ handleWifiMenu(); });
+            }, [this](){ handleWifiMenu(); });
+        }
+    }, [this](){ handleSettings(); });
+}

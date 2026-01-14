@@ -1,7 +1,6 @@
 #pragma once
 #include "ui_manager.h"
 #include "event_types.h"
-#include <vector>
 #include <functional>
 
 enum MenuState {
@@ -18,40 +17,38 @@ struct MenuConfig {
     String message;
     bool isPassword;
     int selected;
+    
+    // Callbacks
+    std::function<void(int)> onSelect;       // For Lists
+    std::function<void(String)> onInput;     // For Text Input
+    std::function<void()> onDismiss;         // For Messages
+    std::function<void()> onBack;            // When ESC/Back is pressed
+    std::function<void()> onLoop;            // Called every loop iteration
 };
 
 class MenuSystem {
 public:
     MenuSystem(UIManager& ui);
     
-    // Setup methods (prepare state, do not block)
-    void showMenu(const String& title, const std::vector<String>& items);
-    void showInput(const String& title, const String& initial = "", bool isPassword = false);
-    void showMessage(const String& title, const String& msg);
+    // Setup methods
+    void showMenu(const String& title, const std::vector<String>& items, std::function<void(int)> onSelect, std::function<void()> onBack = nullptr);
+    void showInput(const String& title, const String& initial, bool isPassword, std::function<void(String)> onInput, std::function<void()> onBack = nullptr);
+    void showMessage(const String& title, const String& msg, std::function<void()> onDismiss = nullptr);
+    void updateMessage(const String& msg);
     
     // The Loop methods
-    // Returns true if state changed or redraw needed
-    bool handleInput(InputEvent e); 
+    bool handleInput(InputEvent e, bool suppressDraw = false); 
     void draw(bool partial = false); 
+    void reset();
 
-    // Result getters
+    // State getters
     bool isRunning() const { return state != MENU_IDLE; }
-    int getSelection() const { return config.selected; }
-    String getInputResult() const { return config.inputText; }
-    bool isConfirmed() const { return confirmed; } 
-
-    // Reset to idle
-    void stop() { state = MENU_IDLE; }
-
-    // Blocking wrappers for legacy compatibility
-    // These require passing KeyboardManager explicitly since MenuSystem is now decoupled
-    int showMenuBlocking(const String& title, const std::vector<String>& items, class KeyboardManager& kb, std::function<void()> idleCb = nullptr);
-    bool textInputBlocking(const String& title, String& result, class KeyboardManager& kb, bool isPassword = false, std::function<void()> idleCb = nullptr);
-    void showMessageBlocking(const String& title, const String& msg, class KeyboardManager& kb);
+    
+    void setOnLoop(std::function<void()> cb) { config.onLoop = cb; }
+    std::function<void()> getOnLoop() const { return config.onLoop; }
 
 private:
     UIManager& ui;
     MenuState state;
     MenuConfig config;
-    bool confirmed;
 };

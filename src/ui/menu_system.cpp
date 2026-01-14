@@ -1,35 +1,55 @@
 #include "ui/menu_system.h"
 #include "board_def.h"
-#include "keyboard_manager.h" // Added for blocking wrappers
 
 MenuSystem::MenuSystem(UIManager& u) 
-    : ui(u), state(MENU_IDLE), confirmed(false) {
+    : ui(u), state(MENU_IDLE) {
 }
 
-void MenuSystem::showMenu(const String& title, const std::vector<String>& items) {
+void MenuSystem::showMenu(const String& title, const std::vector<String>& items, std::function<void(int)> onSelect, std::function<void()> onBack) {
     config.title = title;
     config.items = items;
     config.selected = 0;
+    config.onSelect = onSelect;
+    config.onBack = onBack;
+    config.onLoop = nullptr; // Clear previous loop handlers
     state = MENU_LIST;
-    confirmed = false;
     draw();
 }
 
-void MenuSystem::showInput(const String& title, const String& initial, bool isPassword) {
+void MenuSystem::showInput(const String& title, const String& initial, bool isPassword, std::function<void(String)> onInput, std::function<void()> onBack) {
     config.title = title;
     config.inputText = initial;
     config.isPassword = isPassword;
+    config.onInput = onInput;
+    config.onBack = onBack;
+    config.onLoop = nullptr; // Clear previous loop handlers
     state = MENU_INPUT;
-    confirmed = false;
     draw();
 }
 
-void MenuSystem::showMessage(const String& title, const String& msg) {
+void MenuSystem::showMessage(const String& title, const String& msg, std::function<void()> onDismiss) {
     config.title = title;
     config.message = msg;
+    config.onDismiss = onDismiss;
+    config.onLoop = nullptr; // Clear previous loop handlers
     state = MENU_MESSAGE;
-    confirmed = false;
     draw();
+}
+
+void MenuSystem::updateMessage(const String& msg) {
+    if (state != MENU_MESSAGE) return;
+    config.message = msg;
+    draw(true); // Partial refresh
+}
+
+void MenuSystem::reset() {
+    state = MENU_IDLE;
+    // Clear callbacks to break cycles
+    config.onSelect = nullptr;
+    config.onInput = nullptr;
+    config.onDismiss = nullptr;
+    config.onBack = nullptr;
+    config.onLoop = nullptr;
 }
 
 void MenuSystem::draw(bool partial) {
@@ -41,7 +61,7 @@ void MenuSystem::draw(bool partial) {
             ui.drawInputScreen(config.title, config.inputText, config.isPassword, partial);
             break;
         case MENU_MESSAGE:
-            ui.drawMessage(config.title, config.message);
+            ui.drawMessage(config.title, config.message, partial);
             break;
         case MENU_IDLE:
         default:
@@ -49,7 +69,7 @@ void MenuSystem::draw(bool partial) {
     }
 }
 
-bool MenuSystem::handleInput(InputEvent e) {
+bool MenuSystem::handleInput(InputEvent e, bool suppressDraw) {
     if (state == MENU_IDLE) return false;
     
     // Ignore non-keypress events for now
@@ -63,7 +83,6 @@ bool MenuSystem::handleInput(InputEvent e) {
         
         bool up = (c == 'w'); 
         bool down = (c == 's'); 
-        // Additional mapping can be handled by caller or here
         
         if (up) {
             config.selected--;
@@ -74,104 +93,52 @@ bool MenuSystem::handleInput(InputEvent e) {
             if (config.selected >= (int)config.items.size()) config.selected = 0;
             changed = true;
         } else if (c == '\n') { // Enter
-            confirmed = true;
-            state = MENU_IDLE; 
+            if (config.onSelect) config.onSelect(config.selected);
+            // Warning: onSelect might trigger a new state transition (e.g. showMenu), so 'state' changes.
+            // But usually we just invoke and don't reset state here if we want to stay open, 
+            // OR the callback calls another showMenu.
+            // If the callback calls showMenu, state becomes MENU_LIST again.
+            // If the callback calls nothing? We should probably stay or exit?
+            // "ShowMenu" usually implies a stack or a new view.
             return true; 
         } else if (c == 0x1B || c == 0x03 || c == 0x11) { // ESC
-            confirmed = false;
-            config.selected = -1;
-            state = MENU_IDLE;
+            if (config.onBack) config.onBack();
             return true;
         }
         
         if (changed) {
-            draw();
+            if (!suppressDraw) draw();
             return true;
         }
     } 
     else if (state == MENU_INPUT) {
+        bool changed = false;
         if (c == '\n') {
-            confirmed = true;
-            state = MENU_IDLE;
+            if (config.onInput) config.onInput(config.inputText);
             return true;
         } else if (c == 0x1B || c == 0x03 || c == 0x11) {
-            confirmed = false;
-            state = MENU_IDLE;
+            if (config.onBack) config.onBack();
             return true;
         } else if (c == 0x08) { // Backspace
             if (config.inputText.length() > 0) {
                 config.inputText.remove(config.inputText.length() - 1);
-                draw(true); // Partial text update
-                return true;
+                changed = true;
             }
         } else if (c >= 32 && c <= 126) {
             config.inputText += c;
-            draw(true); // Partial text update
+            changed = true;
+        }
+
+        if (changed) {
+            if (!suppressDraw) draw(true);
             return true;
         }
     }
     else if (state == MENU_MESSAGE) {
         // Any key dismisses
-        confirmed = true;
-        state = MENU_IDLE;
+        if (config.onDismiss) config.onDismiss();
         return true;
     }
 
     return false;
-}
-
-int MenuSystem::showMenuBlocking(const String& title, const std::vector<String>& items, KeyboardManager& kb, std::function<void()> idleCb) {
-    showMenu(title, items);
-    while (isRunning()) {
-        // Poll keyboard
-        kb.loop(); 
-        if (idleCb) idleCb();
-        if (kb.available()) {
-            InputEvent e;
-            e.type = EVENT_KEY_PRESS;
-            e.key = kb.getKeyChar();
-            handleInput(e);
-        } else {
-             delay(10);
-        }
-    }
-    return isConfirmed() ? getSelection() : -1;
-}
-
-bool MenuSystem::textInputBlocking(const String& title, String& result, KeyboardManager& kb, bool isPassword, std::function<void()> idleCb) {
-    showInput(title, result, isPassword);
-    while (isRunning()) {
-        kb.loop();
-        if (idleCb) idleCb();
-        if (kb.available()) {
-            InputEvent e;
-            e.type = EVENT_KEY_PRESS;
-            e.key = kb.getKeyChar();
-            handleInput(e);
-        } else {
-             delay(10);
-        }
-    }
-    if (isConfirmed()) {
-        result = getInputResult();
-        return true;
-    }
-    return false;
-}
-
-
-void MenuSystem::showMessageBlocking(const String& title, const String& msg, KeyboardManager& kb) {
-    showMessage(title, msg);
-    delay(500); // Debounce initial press
-    while (isRunning()) {
-        kb.loop();
-        if (kb.available()) {
-            InputEvent e;
-            e.type = EVENT_KEY_PRESS;
-            e.key = kb.getKeyChar();
-            handleInput(e);
-        } else {
-             delay(10);
-        }
-    }
 }

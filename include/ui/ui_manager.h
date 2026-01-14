@@ -17,7 +17,7 @@ public:
 
     // Standard Screens
     void drawPinEntry(const String& title, const String& subtitle, const String& entry, bool isWrong = false);
-    void drawMessage(const String& title, const String& message);
+    void drawMessage(const String& title, const String& message, bool partial = false);
     void drawSystemInfo(const String& ip, const String& bat, const String& ram, const String& mac);
     void drawShutdownScreen();
     void drawBootScreen(const String& line1, const String& line2);
@@ -34,7 +34,7 @@ public:
     // Generic
     void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex);
     void drawInputScreen(const String& title, const String& currentText, bool isPassword = false, bool textOnly = false);
-    void drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected);
+    void drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected, bool partial = true);
     void drawHelpScreen();
 
     void clearScreen(uint16_t color = GxEPD_WHITE);

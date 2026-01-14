@@ -1,8 +1,7 @@
 #include "wifi_manager.h"
-#include "ui/menu_system.h" 
 #include <vector>
 #include <functional>
-#include <algorithm> // For std::sort
+#include <algorithm>
 
 WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, UIManager& ui_mgr, PowerManager& pwr)
     : terminal(term), keyboard(kb), ui(ui_mgr), power(pwr), security(nullptr) {
@@ -80,7 +79,7 @@ void WifiManager::saveCredentials(const String& ssid, const String& pass) {
             maxSavedIndex++;
             preferences.putInt("count", maxSavedIndex);
         } else {
-             // Full, replace oldest (circular)? Or just last?
+             // Full, replace last (simplified)
              int idx = MAX_SAVED_NETWORKS - 1;
              savedNetworks[idx].ssid = ssid;
              savedNetworks[idx].pass = pass;
@@ -94,8 +93,7 @@ void WifiManager::saveCredentials(const String& ssid, const String& pass) {
 }
 
 void WifiManager::reEncryptAll() {
-    // Assumes savedNetworks[] is populated with plaintext (decrypted on load)
-    // and that SecurityManager has the NEW key set.
+    loadCredentials();
     preferences.begin("tdeck-wifi", false);
     for(int i=0; i<maxSavedIndex; i++) {
          String p = savedNetworks[i].pass;
@@ -105,310 +103,103 @@ void WifiManager::reEncryptAll() {
     preferences.end();
 }
 
-void WifiManager::refreshScreen() {
-    if (renderCallback) renderCallback();
-}
-
-// Helper to enter text using the MenuSystem's UI style
-String WifiManager::readInput(const String& prompt, bool passwordMask) {
-    
-    ui.updateStatusState(power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
-    MenuSystem menu(ui);
-    String result = "";
-    if (menu.textInputBlocking(prompt, result, keyboard, passwordMask, idleCallback)) {
-        return result;
-    }
-    return "";
-}
-
-bool WifiManager::connect() {
-    loadCredentials();
-    
-    MenuSystem menu(ui);
-
-    // Auto-connect attempt
-    if (lastUsedIndex >= 0 && lastUsedIndex < MAX_SAVED_NETWORKS) {
-        if (savedNetworks[lastUsedIndex].ssid.length() > 0) {
-            unsigned long start = millis();
-            bool abort = false;
-            
-            int lastRemain = -1;
-            
-            while (millis() - start < 3000) {
-                int remain = 3 - (millis() - start)/1000;
-                
-                // Only redraw if the second changed
-                if (remain != lastRemain) {
-                    lastRemain = remain;
-                    // Use UIManager to draw the frame
-                    ui.drawAutoConnectScreen(savedNetworks[lastUsedIndex].ssid, remain, power.getPercentage(), power.isCharging());
-                }
-                
-                if (keyboard.isKeyPressed()) {
-                    char c = keyboard.getKeyChar();
-                    // Cancel on 'q' or ESC (Mic+Q is ESC)
-                    if (c == 'q' || c == 0x1B) { 
-                        abort = true;
-                        break;
-                    }
-                }
-                delay(50);
-            }
-            
-            if (!abort) {
-                if (tryConnect(savedNetworks[lastUsedIndex].ssid, savedNetworks[lastUsedIndex].pass)) {
-                    return true; 
-                }
-            }
-        }
-    }
-
-    // Main Loop
-    while (true) {
-        std::vector<String> labels;
-        std::vector<std::function<void()>> actions;
-
-        // 1. Scan
-        labels.push_back("Scan Networks");
-        actions.push_back([this](){ scanAndSelect(); });
-
-        // 2. Saved Networks
-        for (int i=0; i<maxSavedIndex; i++) {
-            if (savedNetworks[i].ssid.length() > 0) {
-                String label = "Saved: " + savedNetworks[i].ssid;
-                int idx = i; 
-                labels.push_back(label);
-                actions.push_back([this, idx](){ 
-                    tryConnect(savedNetworks[idx].ssid, savedNetworks[idx].pass);
-                });
-            }
-        }
-        
-        // 3. Exit
-        labels.push_back("Exit (Offline)");
-        actions.push_back([](){}); 
-
-        int choice = menu.showMenuBlocking("WiFi Manager", labels, keyboard, idleCallback);
-        
-        // Check connectivity first, maybe an action connected us
-        if (WiFi.status() == WL_CONNECTED) {
-             String currentSSID = WiFi.SSID();
-             for(int i=0; i<maxSavedIndex; i++) {
-                 if(savedNetworks[i].ssid == currentSSID) {
-                      preferences.begin("tdeck-wifi", false);
-                      preferences.putInt("last_index", i);
-                      preferences.end();
-                      break;
-                 }
-             }
-            return true;
-        }
-
-        if (choice < 0) return false; // ESC
-        
-        // Execute Action
-        if (choice < actions.size()) {
-             actions[choice]();
-        }
-        
-        // Final Check
-        if (WiFi.status() == WL_CONNECTED) {
-             // Save last index if needed
-             String currentSSID = WiFi.SSID();
-             for(int i=0; i<maxSavedIndex; i++) {
-                 if(savedNetworks[i].ssid == currentSSID) {
-                      preferences.begin("tdeck-wifi", false);
-                      preferences.putInt("last_index", i);
-                      preferences.end();
-                      break;
-                 }
-             }
-             return true;
-        }
-        
-        // If Exit selected
-        if (choice == labels.size() - 1) { 
-            return false;
-        }
-    }
-}
-
-bool WifiManager::tryConnect(const String& ssid, const String& pass) {
-    
-    // Use UIManager
-    ui.drawConnectingScreen(ssid, pass, power.getPercentage(), power.isCharging());
-    
-    // Set Hostname before connecting
-    WiFi.setHostname("ssh-deck");
-    WiFi.begin(ssid.c_str(), pass.c_str());
-    
-    unsigned long start = millis();
-    bool cancelled = false;
-
-    while (WiFi.status() != WL_CONNECTED) {
-        if (millis() - start > 15000) { // 15s timeout
-             return false;
-        }
-        
-        // Allow cancellation
-        if (keyboard.available()) {
-            char c = keyboard.getKeyChar();
-            if (c == 0x1B || c == 'q') {
-                WiFi.disconnect();
-                cancelled = true;
-                break;
-            }
-        }
-        delay(100);
-    }
-    
-    if (cancelled) return false;
-
-    // Sync time for SSL verification
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-    Serial.println("Waiting for NTP time sync: ");
-    
-    time_t nowSecs = time(nullptr);
-    start = millis();
-    
-    // Wait up to 10s for time
-    while (nowSecs < 8 * 3600 * 2 && millis() - start < 10000) {
-        delay(500);
-        Serial.print(".");
-        nowSecs = time(nullptr);
-        
-        // Allow skip
-        if (keyboard.available()) {
-            char c = keyboard.getKeyChar();
-            if (c > 0) break; // Any key skips time sync wait
-        }
-    }
-    Serial.println();
-    
-    return true;
-}
-
-void WifiManager::scanAndSelect() {
-    
-    // Use UIManager
-    ui.drawScanningScreen(power.getPercentage(), power.isCharging());
-    
-    // Ensure separate station mode logic
-    // Set mode to STA to enable scanning (defaults to OFF or NULL on boot)
+// Replaced Logic with Public API
+std::vector<WifiManager::WifiScanResult> WifiManager::scan() {
     WiFi.mode(WIFI_STA);
-    // Explicitly disconnect to ensure radio is dedicated to scanning
-    WiFi.disconnect(); 
-    delay(100);
-
-    Serial.println("Starting WiFi Scan (Blocking)...");
-
-    // Blocking Scan for reliability
+    WiFi.disconnect();
+    
+    // Non-blocking scan? No, scanNetworks is blocking by default.
     int n = WiFi.scanNetworks();
-    Serial.printf("Scan done. Found %d networks\n", n);
+    std::vector<WifiScanResult> res;
     
-    if (n <= 0) {
-        MenuSystem menu(ui);
-        menu.showMessageBlocking("Scan Results", "No Networks Found", keyboard);
-        return; 
-    }
-    
-    // Sort and Deduplicate
-    struct ScanResult {
-        String ssid;
-        int rssi;
-        bool secure;
-    };
-    std::vector<ScanResult> results;
-    
-    for (int i=0; i<n; ++i) {
-        String ssid = WiFi.SSID(i);
-        if (ssid.length() == 0) continue;
-        
-        bool found = false;
-        for(auto& r : results) {
-            if (r.ssid == ssid) {
-                if (WiFi.RSSI(i) > r.rssi) r.rssi = WiFi.RSSI(i); // Keep stronger
-                found = true;
-                break;
+    if (n > 0) {
+        for (int i = 0; i < n; i++) {
+            String ssid = WiFi.SSID(i);
+            if (ssid.length() == 0) continue;
+
+            // Simple deduplication: Keep strongest
+            bool found = false;
+            for(auto& existing : res) {
+                if(existing.ssid == ssid) {
+                    found = true;
+                    // If current is stronger, update
+                    if(WiFi.RSSI(i) > existing.rssi) {
+                         existing.rssi = WiFi.RSSI(i);
+                         existing.secure = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+                    }
+                    break;
+                }
             }
-        }
-        
-        if (!found) {
-            bool sec = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
-            results.push_back({ssid, (int)WiFi.RSSI(i), sec});
+
+            if (!found) {
+                WifiScanResult r;
+                r.ssid = ssid;
+                r.rssi = WiFi.RSSI(i);
+                r.secure = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+                res.push_back(r);
+            }
         }
     }
     
     // Sort by RSSI descending
-    std::sort(results.begin(), results.end(), [](const ScanResult& a, const ScanResult& b) {
+    std::sort(res.begin(), res.end(), [](const WifiScanResult& a, const WifiScanResult& b) {
         return a.rssi > b.rssi;
     });
     
-    MenuSystem menu(ui);
-    while (true) {
-        std::vector<String> labels;
-        for(const auto& r : results) {
-            String l = r.ssid;
-            // Pad for alignment if needed, or just append info
-            // Signal Bars approximation
-            String signal = (r.rssi > -60) ? "[====]" : (r.rssi > -70) ? "[=== ]" : (r.rssi > -80) ? "[==  ]" : "[=   ]";
-            String lock = r.secure ? "*" : " ";
-            labels.push_back(l + " " + lock + " " + signal);
+    return res;
+}
+
+std::vector<WifiManager::WifiInfo> WifiManager::getSavedNetworks() {
+    loadCredentials();
+    std::vector<WifiInfo> res;
+    for(int i=0; i<maxSavedIndex; i++) {
+        res.push_back({savedNetworks[i].ssid, savedNetworks[i].pass});
+    }
+    return res;
+}
+
+bool WifiManager::connectTo(const String& ssid, const String& pass) {
+    if (ssid.length() == 0) return false;
+
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname("ssh-deck");
+    
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    
+    unsigned long start = millis();
+    while (millis() - start < 15000) { // 15s timeout
+        if (WiFi.status() == WL_CONNECTED) {
+            // Sync time for SSL verification
+            configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+            return true;
         }
-        labels.push_back("[ Rescan ]");
         
-        int choice = menu.showMenuBlocking("Scan Results", labels, keyboard, idleCallback);
+        // Call callbacks to keep UI alive (mostly feeding watchdogs if any)
+        if (idleCallback) idleCallback();
         
-        if (choice < 0) return; // ESC
-        
-        if (choice == labels.size() - 1) { // Rescan
-            scanAndSelect();
-            return;
-        }
-        
-        if (choice < results.size()) {
-            String ssid = results[choice].ssid;
-            
-            // Check if already saved
-            String pass = "";
-            bool known = false;
-            for(int k=0; k<maxSavedIndex; k++) {
-                if(savedNetworks[k].ssid == ssid) {
-                    pass = savedNetworks[k].pass;
-                    known = true;
-                    break;
-                }
-            }
-            
-            if (!known && results[choice].secure) {
-                if (!menu.textInputBlocking("Password", pass, keyboard, true, idleCallback)) {
-                    continue; // Cancelled password entry
-                }
-            }
-            
-            if (tryConnect(ssid, pass)) {
-                saveCredentials(ssid, pass);
-                menu.showMessageBlocking("Success", "Connected!", keyboard);
-                // Update last index
-                for(int k=0; k<maxSavedIndex; k++) {
-                    if(savedNetworks[k].ssid == ssid) {
-                        preferences.begin("tdeck-wifi", false);
-                        preferences.putInt("last_index", k);
-                        preferences.end();
-                        break;
-                    }
-                }
-                return;
-            } else {
-                menu.showMessageBlocking("Error", "Connection Failed", keyboard);
-            }
+        delay(100);
+    }
+    return false;
+}
+
+void WifiManager::save(const String& ssid, const String& pass) {
+    saveCredentials(ssid, pass);
+    // Remember last used
+    for(int i=0; i<maxSavedIndex; i++) {
+        if (savedNetworks[i].ssid == ssid) {
+             preferences.begin("tdeck-wifi", false);
+             preferences.putInt("last_index", i);
+             preferences.end();
+             break;
         }
     }
 }
 
-String WifiManager::readInput(bool passwordMask) {
-    return readInput("Enter Value:", passwordMask);
+void WifiManager::forget(int index) {
+    deleteCredential(index);
 }
+
 
 void WifiManager::deleteCredential(int index) {
     if (index < 0 || index >= maxSavedIndex) return;
@@ -422,106 +213,15 @@ void WifiManager::deleteCredential(int index) {
         preferences.putString(("pass" + String(i)).c_str(), savedNetworks[i].pass);
     }
     
-    // Clear last one (optional, but good practice to avoid ghosts if count mismatch)
-    // Actually just decrementing count is enough for logic, but let's be clean
-    // NVS keys for the last one will just be overwritten next time.
-    
     maxSavedIndex--;
     preferences.putInt("count", maxSavedIndex);
     preferences.end();
 }
 
-void WifiManager::manage() {
+bool WifiManager::connect() {
     loadCredentials();
-    
-    MenuSystem menu(ui);
-    
-    while(true) {
-        std::vector<String> items;
-        // Header Actions
-        items.push_back("[ Scan Networks ]");
-        items.push_back("[ Add Manually ]");
-        
-        // List Saved
-        for(int i=0; i<maxSavedIndex; i++) {
-            String label = savedNetworks[i].ssid;
-            // Mark connected
-            if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == label) {
-                label = "> " + label + " (Active)";
-            }
-            items.push_back(label);
-        }
-        
-        int choice = menu.showMenuBlocking("WiFi Manager", items, keyboard, idleCallback);
-        
-        if (choice < 0) return; // ESC/Back
-        
-        if (choice == 0) {
-            scanAndSelect();
-            // Reload in case scan added something
-            loadCredentials();
-        }
-        else if (choice == 1) {
-            String s, p;
-            if (menu.textInputBlocking("SSID", s, keyboard, false, idleCallback)) {
-                if (s.length() > 0) {
-                     menu.textInputBlocking("Password", p, keyboard, true, idleCallback); // Allow empty pass
-                     if (tryConnect(s, p)) {
-                         saveCredentials(s, p);
-                         menu.showMessageBlocking("Success", "Connected & Saved", keyboard);
-                     } else {
-                         // Save anyway?
-                         std::vector<String> yn = {"Yes", "No"};
-                         if (menu.showMenuBlocking("Connect Failed. Save?", yn, keyboard, idleCallback) == 0) {
-                             saveCredentials(s, p);
-                         }
-                     }
-                     loadCredentials();
-                }
-            }
-        }
-        else {
-            // Saved Network Action
-            int idx = choice - 2;
-            if (idx >= 0 && idx < maxSavedIndex) {
-                String sel = savedNetworks[idx].ssid;
-                
-                std::vector<String> acts;
-                acts.push_back("Connect");
-                acts.push_back("Edit Password");
-                acts.push_back("Delete");
-                
-                int act = menu.showMenuBlocking(sel, acts, keyboard, idleCallback);
-                
-                if (act == 0) { // Connect
-                    if(tryConnect(savedNetworks[idx].ssid, savedNetworks[idx].pass)) {
-                        menu.showMessageBlocking("Success", "Connected", keyboard);
-                        // Save usage preference
-                         preferences.begin("tdeck-wifi", false);
-                         preferences.putInt("last_index", idx);
-                         preferences.end();
-                        return;
-                    } else {
-                        menu.showMessageBlocking("Error", "Connect Failed", keyboard);
-                    }
-                }
-                else if (act == 1) { // Edit
-                    String p = savedNetworks[idx].pass;
-                    if (menu.textInputBlocking("New Password", p, keyboard, true, idleCallback)) {
-                        saveCredentials(sel, p);
-                        loadCredentials();
-                        menu.showMessageBlocking("Saved", "Password Updated", keyboard);
-                    }
-                }
-                else if (act == 2) { // Delete
-                    std::vector<String> yn = {"No", "Yes"};
-                    if (menu.showMenuBlocking("Delete " + sel + "?", yn, keyboard, idleCallback) == 1) {
-                         deleteCredential(idx);
-                         loadCredentials(); // Refresh memory just in case
-                         // loadCredentials actually reads from NVS, deleteCredential updates arrays too but simplest to be in sync
-                    }
-                }
-            }
-        }
+    if (lastUsedIndex >= 0 && lastUsedIndex < maxSavedIndex) {
+        return connectTo(savedNetworks[lastUsedIndex].ssid, savedNetworks[lastUsedIndex].pass);
     }
+    return false; // No auto-connect target
 }

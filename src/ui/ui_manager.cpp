@@ -63,15 +63,36 @@ void UIManager::drawPinEntry(const String& title, const String& subtitle, const 
     });
 }
 
-void UIManager::drawMessage(const String& title, const String& message) {
-    display.setRefreshMode(false);
+void UIManager::drawMessage(const String& title, const String& message, bool partial) {
+    display.setRefreshMode(partial);
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         drawHeader(title);
         
         // Center the message roughly
-        int msgY = height() / 2;
-        drawCenteredText(msgY, message, u8g2_font_helvR12_tr);
+        int msgY = height() / 2 - 20; // Adjusted for multi-line
         
+        u8g2.setFont(u8g2_font_helvR12_tr);
+        u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
+        
+        // Split by newlines
+        int y = msgY;
+        int lineHeight = 20;
+        
+        String temp = message;
+        while (temp.length() > 0) {
+            int idx = temp.indexOf('\n');
+            String line = (idx == -1) ? temp : temp.substring(0, idx);
+            
+            int w = u8g2.getUTF8Width(line.c_str());
+            u8g2.setCursor((width() - w)/2, y);
+            u8g2.print(line);
+            
+            y += lineHeight;
+            if (idx == -1) break;
+            temp = temp.substring(idx + 1);
+        }
+    
         drawFooter("Press Key");
     });
 }
@@ -372,7 +393,8 @@ void UIManager::drawInputScreen(const String& title, const String& currentText, 
     });
 }
 
-void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected) {
+void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected, bool partial) {
+    display.setRefreshMode(partial);
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         drawStatusBar(statusTitle, wifiConnected, batteryPercent, isCharging);
 

@@ -20,16 +20,30 @@ public:
     std::function<void()> getIdleCallback() const { return idleCallback; }
     void setRenderCallback(std::function<void()> cb);
 
-    // Attempt to connect using saved credentials or user selection
-    // Returns true if successfully connected
+    // Attempt to connect using saved credentials (auto-connect)
     bool connect(); 
     
-    // Manage saved networks (List, Edit, Delete)
-    void manage();
+    struct WifiScanResult {
+        String ssid;
+        int rssi;
+        bool secure;
+    };
+
+    // Core Logic (Public for App UI)
+    std::vector<WifiScanResult> scan(); 
+    bool connectTo(const String& ssid, const String& pass);
+    void save(const String& ssid, const String& pass);
+    void forget(int index);
     void reEncryptAll();
 
+    struct WifiInfo {
+        String ssid;
+        String pass; // Decrypted or raw
+    };
+    std::vector<WifiInfo> getSavedNetworks();
+
 private:
-    void deleteCredential(int index);
+   
     std::function<void()> idleCallback;
     std::function<void()> renderCallback;
     
@@ -40,6 +54,13 @@ private:
     Preferences preferences;
     SecurityManager* security;
     
+    void loadCredentials();
+    void saveCredentials(const String& ssid, const String& pass);
+    void deleteCredential(int index);
+    
+    // Helper to refresh screen if needed (mostly unnecessary in new arch)
+    void refreshScreen();
+
     struct WifiCreds {
         String ssid;
         String pass;
@@ -48,19 +69,7 @@ private:
     // Support up to 5 saved networks
     static const int MAX_SAVED_NETWORKS = 5;
     WifiCreds savedNetworks[MAX_SAVED_NETWORKS];
-    int lastUsedIndex = -1;
     int maxSavedIndex = 0;
-    
-    // Made public for App::changePin
-    void loadCredentials(); 
-    void saveCredentials(const String& ssid, const String& pass);
-    
-
-    bool tryConnect(const String& ssid, const String& pass);
-    void scanAndSelect();
-    String readInput(bool passwordMask = false);
-    String readInput(const String& prompt, bool passwordMask);
-    
-    // Helper to refresh display during input loops
-    void refreshScreen();
+    int lastUsedIndex = -1;
 };
+
