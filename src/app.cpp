@@ -264,35 +264,34 @@ void App::requestRefresh() {
 
 void App::drawTerminalScreen(bool partial) {
     // Thread-safe display update with mutex
-    if (displayMutex && xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100))) {
-        // Construct Title for status bar
-        String title = "";
-        if (WiFi.status() == WL_CONNECTED) {
-            title = WiFi.SSID();
-            if (title.length() > 8) title = title.substring(0, 8);
-        } else {
-            title = "Offline";
-        }
-        
-        if (sshClient && sshClient->isConnected()) {
-            title += " > ";
-            String host = sshClient->getConnectedHost();
-            if (host.length() > 10) host = host.substring(0, 10);
-            title += host;
-        }
-
-        ui.drawTerminal(terminal, title, power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED, partial);
-        terminal.clearUpdateFlag();
-        
-        xSemaphoreGive(displayMutex);
+    display.lock();
+    
+    // Construct Title for status bar
+    String title = "";
+    if (WiFi.status() == WL_CONNECTED) {
+        title = WiFi.SSID();
+        if (title.length() > 8) title = title.substring(0, 8);
+    } else {
+        title = "Offline";
     }
+    
+    if (sshClient && sshClient->isConnected()) {
+        title += " > ";
+        String host = sshClient->getConnectedHost();
+        if (host.length() > 10) host = host.substring(0, 10);
+        title += host;
+    }
+
+    ui.drawTerminal(terminal, title, power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED, partial);
+    terminal.clearUpdateFlag();
+    
+    display.unlock();
 }
 
 void App::showHelpScreen() {
-    if (displayMutex && xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100))) {
-        ui.drawHelpScreen();
-        xSemaphoreGive(displayMutex);
-    }
+    display.lock();
+    ui.drawHelpScreen();
+    display.unlock();
     
     while(true) {
         if(keyboard.isKeyPressed()) {

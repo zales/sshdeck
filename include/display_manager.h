@@ -30,8 +30,13 @@ public:
     
     GxEPD2_BW<GxEPD2_310_GDEQ031T10, GxEPD2_310_GDEQ031T10::HEIGHT>& getDisplay();
     U8G2_FOR_ADAFRUIT_GFX& getFonts();
+
+    // Thread Safety
+    void lock();
+    void unlock();
     
 private:
     GxEPD2_BW<GxEPD2_310_GDEQ031T10, GxEPD2_310_GDEQ031T10::HEIGHT> display;
     U8G2_FOR_ADAFRUIT_GFX u8g2Fonts;
+    SemaphoreHandle_t _mutex = NULL;
 };

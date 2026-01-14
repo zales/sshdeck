@@ -15,8 +15,10 @@ void AppMenuState::update(App& app) {
     }
 
     bool needsRedraw = false;
-    int processed = 0;
-    while(processed < 5) {
+    unsigned long startTime = millis();
+    // Time budget of 10ms for input processing to keep UI responsive
+    // without blocking the loop for too long
+    while(app.keyboard.available() && (millis() - startTime < 10)) {
         InputEvent event = app.pollInputs();
         
         if (event.type == EVENT_NONE) break;
@@ -26,19 +28,20 @@ void AppMenuState::update(App& app) {
             return;
         }
         
-        // Only draw on the LAST event of the batch
-        bool isLast = !app.keyboard.available() || processed >= 4;
+        // Only draw on the LAST event of the batch or if we ran out of time
+        bool isLast = !app.keyboard.available();
         bool suppressDraw = !isLast;
         
         if (app.menu->handleInput(event, suppressDraw)) {
              if (suppressDraw) needsRedraw = true;
         }
-        processed++;
     }
     
     // Explicit redraw if we suppressed it during batch processing
     if (needsRedraw) {
+        app.display.lock();
         app.menu->draw();
+        app.display.unlock();
     }
     
     // If menu becomes idle (and no callback handled it), force Main Menu

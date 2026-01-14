@@ -4,6 +4,7 @@
 
 DisplayManager::DisplayManager() 
     : display(GxEPD2_310_GDEQ031T10(BOARD_EPD_CS, BOARD_EPD_DC, BOARD_EPD_RST, BOARD_EPD_BUSY)) {
+    _mutex = xSemaphoreCreateMutex();
 }
 
 bool DisplayManager::begin() {
@@ -84,4 +85,16 @@ GxEPD2_BW<GxEPD2_310_GDEQ031T10, GxEPD2_310_GDEQ031T10::HEIGHT>& DisplayManager:
 
 U8G2_FOR_ADAFRUIT_GFX& DisplayManager::getFonts() {
     return u8g2Fonts;
+}
+
+void DisplayManager::lock() {
+    if (_mutex) {
+        xSemaphoreTake(_mutex, portMAX_DELAY);
+    }
+}
+
+void DisplayManager::unlock() {
+    if (_mutex) {
+        xSemaphoreGive(_mutex);
+    }
 }

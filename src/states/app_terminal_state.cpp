@@ -10,8 +10,8 @@ void AppTerminalState::enter(App& app) {
 void AppTerminalState::update(App& app) {
     // 1. Process ALL pending inputs at once to speed up typing
     // We check for keyboard availability directly to drain the buffer
-    int processed = 0;
-    while(app.keyboard.available() && processed < 5) {
+    unsigned long startTime = millis();
+    while(app.keyboard.available() && (millis() - startTime < 10)) {
         InputEvent event = app.pollInputs();
 
         if (event.type == EVENT_NONE) break;
@@ -26,7 +26,6 @@ void AppTerminalState::update(App& app) {
                 app.sshClient->write(event.key); // Send to network buffer
             }
         }
-        processed++;
     }
 
     // Pass one phantom event if loop needs it, or just rely on the fact pollInputs was called
@@ -75,7 +74,10 @@ void AppTerminalState::update(App& app) {
         }
 
         if (!app.sshClient->isConnected()) {
+            app.display.lock();
             app.ui.drawMessage("Disconnected", "Session Ended");
+            app.display.unlock();
+            
             delay(1000); // Give user time to see
             app.changeState(new AppMenuState());
         }

@@ -4,9 +4,6 @@
 // Global I2C Mutex
 extern SemaphoreHandle_t i2cMutex;
 
-// Global Display Mutex (protects terminal & display access)
-extern SemaphoreHandle_t displayMutex;
-
 // Pin definitions for LilyGo T-Deck Pro (E-Paper Version)
 // Source: https://github.com/Xinyuan-LilyGO/T-Deck-Pro/blob/main/examples/factory/utilities.h
 
