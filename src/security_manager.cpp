@@ -1,14 +1,17 @@
 #include "security_manager.h"
 #include <mbedtls/sha256.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/pkcs5.h>
 #include <cstring>
 
-// Fixed IV for simplicity in this project (16 bytes)
-// In high security ctx, this should be random and stored with ciphertext
-static const unsigned char FIXED_IV[16] = { 
-    0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF,
-    0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF 
+// Salt for PBKDF2 (stored in code, in production would be per-user and stored securely)
+static const unsigned char PBKDF2_SALT[16] = { 
+    0x5A, 0x45, 0x52, 0x4F, 0x53, 0x41, 0x4C, 0x54,
+    0x44, 0x45, 0x43, 0x4B, 0x50, 0x52, 0x4F, 0x31
 };
+
+// PBKDF2 iterations (10,000 is minimum recommended, higher = slower but more secure)
+static const int PBKDF2_ITERATIONS = 10000;
 
 SecurityManager::SecurityManager() : keyValid(false) {
     memset(aesKey, 0, sizeof(aesKey));
@@ -19,13 +22,22 @@ void SecurityManager::begin() {
 }
 
 void SecurityManager::setKeyFromPin(const String& pin) {
-    // Hash PIN to get 32-byte key (SHA-256)
-    mbedtls_sha256_context sha_ctx;
-    mbedtls_sha256_init(&sha_ctx);
-    mbedtls_sha256_starts(&sha_ctx, 0); // 0 = SHA-256
-    mbedtls_sha256_update(&sha_ctx, (const unsigned char*)pin.c_str(), pin.length());
-    mbedtls_sha256_finish(&sha_ctx, aesKey);
-    mbedtls_sha256_free(&sha_ctx);
+    // Derive key from PIN using PBKDF2-HMAC-SHA256 (industry standard)
+    // This is MUCH more secure than MD5 or plain SHA256
+    mbedtls_md_context_t md_ctx;
+    mbedtls_md_init(&md_ctx);
+    
+    const mbedtls_md_info_t* md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    mbedtls_md_setup(&md_ctx, md_info, 1); // 1 = HMAC
+    
+    mbedtls_pkcs5_pbkdf2_hmac(&md_ctx,
+                              (const unsigned char*)pin.c_str(), pin.length(),
+                              PBKDF2_SALT, sizeof(PBKDF2_SALT),
+                              PBKDF2_ITERATIONS,
+                              32, // Output 256-bit key
+                              aesKey);
+    
+    mbedtls_md_free(&md_ctx);
     
     // We don't set keyValid=true here yet, only after auth check
 }
@@ -78,17 +90,16 @@ String SecurityManager::encrypt(const String& plainText) {
     int pad = 16 - (len % 16);
     int paddedLen = len + pad;
     
-    // Allocate buffer for IV + Encrypted Content
-    // Structure: [IV (16 bytes)] [Ciphertext (N bytes)]
+    // Use unique_ptr for automatic cleanup - prevents memory leaks!
     int totalLen = 16 + paddedLen;
-    unsigned char* outputBuf = new unsigned char[totalLen];
+    std::unique_ptr<unsigned char[]> outputBuf(new unsigned char[totalLen]);
+    std::unique_ptr<unsigned char[]> inputBuf(new unsigned char[paddedLen]);
     
     // Copy IV to start of output
-    memcpy(outputBuf, iv, 16);
+    memcpy(outputBuf.get(), iv, 16);
     
     // Prepare input padded buffer
-    unsigned char* inputBuf = new unsigned char[paddedLen];
-    memcpy(inputBuf, plainText.c_str(), len);
+    memcpy(inputBuf.get(), plainText.c_str(), len);
     for (int i = 0; i < pad; i++) {
         inputBuf[len + i] = (unsigned char)pad;
     }
@@ -96,27 +107,29 @@ String SecurityManager::encrypt(const String& plainText) {
     // 3. Encrypt AES-256-CBC
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
-    mbedtls_aes_setkey_enc(&aes, aesKey, 256);
-    // Encrypt into output buffer offset by 16 bytes
-    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, paddedLen, iv, inputBuf, outputBuf + 16);
+    int ret = mbedtls_aes_setkey_enc(&aes, aesKey, 256);
+    if (ret != 0) {
+        mbedtls_aes_free(&aes);
+        return ""; // Encryption setup failed
+    }
+    
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, paddedLen, iv, inputBuf.get(), outputBuf.get() + 16);
     mbedtls_aes_free(&aes);
-
-    delete[] inputBuf;
 
     // 4. Base64 Encode Full Bundle
     size_t dlen = 0;
-    mbedtls_base64_encode(NULL, 0, &dlen, outputBuf, totalLen); 
+    mbedtls_base64_encode(NULL, 0, &dlen, outputBuf.get(), totalLen); 
     
-    unsigned char* b64Buf = new unsigned char[dlen + 1];
+    std::unique_ptr<unsigned char[]> b64Buf(new unsigned char[dlen + 1]);
     size_t olen = 0;
-    mbedtls_base64_encode(b64Buf, dlen + 1, &olen, outputBuf, totalLen);
+    ret = mbedtls_base64_encode(b64Buf.get(), dlen + 1, &olen, outputBuf.get(), totalLen);
+    if (ret != 0) {
+        return ""; // Base64 encoding failed
+    }
     b64Buf[olen] = '\0';
 
-    String result = String((char*)b64Buf);
-
-    delete[] outputBuf;
-    delete[] b64Buf;
-
+    String result = String((char*)b64Buf.get());
+    // unique_ptr automatically deletes all buffers here
     return result;
 }
 
@@ -128,47 +141,57 @@ String SecurityManager::decrypt(const String& cipherText) {
     
     // Calculate required buffer size: (len * 3) / 4 + safety
     size_t bufSize = (len * 3 / 4) + 16; 
-    unsigned char* encBuf = new unsigned char[bufSize];
+    std::unique_ptr<unsigned char[]> encBuf(new unsigned char[bufSize]);
     size_t olen = 0;
     
-    if (mbedtls_base64_decode(encBuf, bufSize, &olen, (const unsigned char*)cipherText.c_str(), len) != 0) {
-        delete[] encBuf;
-        return ""; // Decode failed
+    if (mbedtls_base64_decode(encBuf.get(), bufSize, &olen, (const unsigned char*)cipherText.c_str(), len) != 0) {
+        return ""; // Decode failed - unique_ptr auto-cleans
     }
 
     // Check minimum length (IV + at least 1 block)
     if (olen < 32) {
-        delete[] encBuf;
-        return "";
+        return ""; // unique_ptr auto-cleans
     }
 
     // 2. Extract IV
     unsigned char iv[16];
-    memcpy(iv, encBuf, 16); // First 16 bytes are IV
+    memcpy(iv, encBuf.get(), 16); // First 16 bytes are IV
 
     // 3. Decrypt AES-256-CBC (Skipping first 16 bytes of IV)
     int cipherLen = olen - 16;
-    unsigned char* decBuf = new unsigned char[cipherLen];
+    std::unique_ptr<unsigned char[]> decBuf(new unsigned char[cipherLen]);
 
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
-    mbedtls_aes_setkey_dec(&aes, aesKey, 256);
-    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, cipherLen, iv, encBuf + 16, decBuf);
+    int ret = mbedtls_aes_setkey_dec(&aes, aesKey, 256);
+    if (ret != 0) {
+        mbedtls_aes_free(&aes);
+        return ""; // Decryption setup failed
+    }
+    
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, cipherLen, iv, encBuf.get() + 16, decBuf.get());
     mbedtls_aes_free(&aes);
 
-    // 4. Remove Padding (PKCS#7)
+    // 4. Remove Padding (PKCS#7) with validation
     int pad = decBuf[cipherLen - 1];
-    if (pad > 0 && pad <= 16) {
-        decBuf[cipherLen - pad] = '\0';
-        String result = String((char*)decBuf);
-        delete[] encBuf;
-        delete[] decBuf;
-        return result;
+    if (pad > 0 && pad <= 16 && cipherLen >= pad) {
+        // Validate padding bytes (all should be equal to pad value)
+        bool validPadding = true;
+        for (int i = 0; i < pad; i++) {
+            if (decBuf[cipherLen - 1 - i] != pad) {
+                validPadding = false;
+                break;
+            }
+        }
+        
+        if (validPadding) {
+            decBuf[cipherLen - pad] = '\0';
+            String result = String((char*)decBuf.get());
+            return result;
+        }
     }
 
-    delete[] encBuf;
-    delete[] decBuf;
-    return "";
+    return ""; // Invalid padding or decryption failed
 }
 #include "security_manager.h"
 

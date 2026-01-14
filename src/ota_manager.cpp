@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <memory>
 
 OtaManager::OtaManager(DisplayManager& disp) : display(disp) {
 }
@@ -15,7 +16,7 @@ UpdateManifest OtaManager::fetchManifest(const String& manifestUrl, const String
     }
     
     HTTPClient http;
-    WiFiClientSecure* client = new WiFiClientSecure;
+    std::unique_ptr<WiFiClientSecure> client(new WiFiClientSecure);
     
     if(rootCaCert.length() > 0) {
         client->setCACert(rootCaCert.c_str());
@@ -63,7 +64,7 @@ UpdateManifest OtaManager::fetchManifest(const String& manifestUrl, const String
         Serial.println("Unable to connect");
     }
     
-    delete client;
+    // unique_ptr automatically deletes client
     return result;
 }
 
@@ -116,7 +117,7 @@ bool OtaManager::updateFromUrl(const String& url, const String& rootCaCert) {
     drawProgress(0, "Connecting...");
 
     HTTPClient http;
-    WiFiClientSecure *client = new WiFiClientSecure;
+    std::unique_ptr<WiFiClientSecure> client(new WiFiClientSecure);
     if (!client) {
         Serial.println("OTA: Failed to allocate WiFiClientSecure");
         drawProgress(0, "Memory Error");
@@ -155,7 +156,6 @@ bool OtaManager::updateFromUrl(const String& url, const String& rootCaCert) {
         drawProgress(0, "HTTP Error " + String(httpCode));
         delay(2000);
         http.end();
-        if (client) delete client;
         return false;
     }
 
@@ -168,7 +168,6 @@ bool OtaManager::updateFromUrl(const String& url, const String& rootCaCert) {
         drawProgress(0, "Bad Cont-Len");
         delay(2000);
         http.end();
-        if (client) delete client;
         return false;
     }
 
@@ -178,7 +177,6 @@ bool OtaManager::updateFromUrl(const String& url, const String& rootCaCert) {
         drawProgress(0, "No Space");
         delay(2000);
         http.end();
-        if (client) delete client;
         return false;
     }
 
@@ -235,7 +233,7 @@ bool OtaManager::updateFromUrl(const String& url, const String& rootCaCert) {
     drawProgress(0, "Failed");
     delay(2000);
     http.end();
-    if (client) delete client;
+    // unique_ptr automatically deletes client
     return false;
 }
 
@@ -258,10 +256,10 @@ String OtaManager::checkUpdateAvailable(const String& binUrl, const String& curr
     Serial.println("OTA: Checking version at " + verUrl);
     
     HTTPClient http;
-    WiFiClientSecure *client = nullptr;
+    std::unique_ptr<WiFiClientSecure> client;
 
     if (verUrl.startsWith("https://")) {
-        client = new WiFiClientSecure;
+        client.reset(new WiFiClientSecure);
         if (!client) {
             Serial.println("OTA: Failed to allocate WiFiClientSecure");
             return "";
@@ -284,12 +282,9 @@ String OtaManager::checkUpdateAvailable(const String& binUrl, const String& curr
     if (httpCode < 0 && rootCaCert.length() > 0) {
         Serial.println("Check SSL Fail. Retrying Insecure...");
         http.end();
-        if (client) {
-            delete client;
-            client = nullptr;
-        }
+        client.reset(); // Release old client
         
-        client = new WiFiClientSecure;
+        client.reset(new WiFiClientSecure);
         if (!client) {
             Serial.println("OTA: Failed to allocate WiFiClientSecure for retry");
             return "";
@@ -326,7 +321,7 @@ String OtaManager::checkUpdateAvailable(const String& binUrl, const String& curr
     }
     
     http.end();
-    if (client) delete client;
+    // unique_ptr automatically deletes client
     return newVer;
 }
 

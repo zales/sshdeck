@@ -4,6 +4,8 @@
 #include <Preferences.h>
 #include <mbedtls/aes.h>
 #include <mbedtls/md.h>
+#include <mbedtls/pkcs5.h>
+#include <memory>
 
 class SecurityManager {
 public:
