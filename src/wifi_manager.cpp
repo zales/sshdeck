@@ -161,6 +161,9 @@ std::vector<WifiManager::WifiInfo> WifiManager::getSavedNetworks() {
 bool WifiManager::connectTo(const String& ssid, const String& pass) {
     if (ssid.length() == 0) return false;
 
+    // Feedback for user
+    ui.drawConnectingScreen(ssid, pass, power.getPercentage(), power.isCharging());
+
     WiFi.disconnect();
     WiFi.mode(WIFI_STA);
     WiFi.setHostname("ssh-deck");
