@@ -393,31 +393,114 @@ void UIManager::drawInputScreen(const String& title, const String& currentText, 
     });
 }
 
+// Helper to clamp values
+template<typename T>
+T clamp(T val, T min, T max) {
+    if (val < min) return min;
+    if (val > max) return max;
+    return val;
+}
+
 void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected, bool partial) {
-    display.setRefreshMode(partial);
+    
+    // Partial Refresh Logic
+    // If partial mode is requested, we try to limit the refresh window to only dirty rows.
+    // This maintains display performance while ensuring correctness (persisting the rest of the screen).
+    
+    int winX = 0;
+    int winY = 0;
+    int winW = display.getWidth();
+    int winH = display.getHeight();
+    
+    // Terminal geometry constants
+    const int termYStart = 24;
+    const int termLineH = 10;
+    const int termCharW = 6;
+    
+    if (partial) {
+        int startRow, endRow;
+        if (term.getDirtyRange(startRow, endRow)) {
+            // Calculate pixel window
+            // Include a small margin/padding to cover cursor artifacts or line spacing
+            int y1 = termYStart + (startRow * termLineH) - 8; // Top of the first dirty line
+            int y2 = termYStart + (endRow * termLineH) + termLineH; // Bottom of the last dirty line
+            
+            // Fix for status bar fading:
+            // If the update is near the top of the terminal (Row 0-2), extend the window 
+            // to include the Status Bar (Y=0). This ensures the status bar gets refreshed 
+            // and maintains contrast, avoiding border artifacts or fading from nearby updates.
+            if (y1 < 40) {
+                y1 = 0;
+            }
+            
+            // Bounds checking
+            y1 = clamp(y1, 0, winH);
+            y2 = clamp(y2, 0, winH);
+            
+            winY = y1;
+            winH = y2 - y1;
+            
+            // Ensure alignment for some E-Ink controllers (usually multiple of 8 for X, Y is flexible)
+            // GxEPD2 handles byte alignment internally usually, but let's be safe on height > 0
+            if (winH <= 0) winH = termLineH; 
+            
+            display.setPartialWindow(winX, winY, winW, winH);
+        } else {
+             // Nothing to draw?
+             // But maybe Status bar need update?
+             // If terminal says no dirty rows, we technically don't need to redraw terminal lines.
+             // But for safety let's just do nothing or minimal.
+             // Let's assume if drawTerminal is called, something MIGHT have changed.
+             // Fallback to full screen partial update if no specific rows dirty (e.g. status bar update only)
+             display.setRefreshMode(true);
+        }
+    } else {
+        display.setRefreshMode(false); // Full Refresh
+    }
+
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        
+        // Always draw status bar because render() might clear the buffer
+        // Note: If partial window is set to NOT include the status bar area (y < 16),
+        // this draw call will be clipped/ignored by the display driver efficiently.
+        // So it is safe to act as if we are drawing the whole screen.
         drawStatusBar(statusTitle, wifiConnected, batteryPercent, isCharging);
 
         u8g2.setFont(u8g2_font_6x10_tf);
         u8g2.setFontMode(1);
         
         // Terminal Content
-        int y_start = 24;
-        int line_h = 10;
-        int char_w = 6;
-        
         for (int row = 0; row < TERM_ROWS; row++) {
+            // We draw all rows. The clipping of the Partial Window takes care of optimization.
+            
             const char* line = term.getLine(row);
+            int py = termYStart + (row * termLineH);
+            
+            // Optimization inside the loop:
+            // Check if this row is even visible within our current Partial Window
+            // We can skip drawing commands for rows totally outside the window to save SPI/Buffer operations.
+            // If partial mode only covers rows 10-12, row 0 draws are wasted CPU cycles.
+            if (partial) {
+                 int rowTop = py - 8;
+                 int rowBottom = py + termLineH;
+                 if (rowBottom < winY || rowTop > (winY + winH)) {
+                     continue;
+                 }
+            }
+
+            // Clear the line area first to avoid artifacts
+            display.fillRect(0, py - 8, display.getWidth(), termLineH, GxEPD_WHITE);
+            
             if (line[0] != '\0') {
                 for (int col = 0; line[col] != '\0' && col < TERM_COLS; col++) {
                     char ch = line[col];
                     bool inv = term.getAttr(row, col).inverse;
                     
-                    int x = col * char_w;
-                    int y = y_start + (row * line_h);
+                    int x = col * termCharW;
+                    int y = py;
                     
                     if (inv) {
-                        display.fillRect(x, y - 8, char_w, line_h, GxEPD_BLACK);
+                        display.fillRect(x, y - 8, termCharW, termLineH, GxEPD_BLACK);
                         u8g2.setFontMode(1); 
                         u8g2.setForegroundColor(GxEPD_WHITE);
                         u8g2.setBackgroundColor(GxEPD_BLACK);
@@ -435,26 +518,31 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
             int cx = term.getCursorX();
             int cy = term.getCursorY();
             if (cx >= 0 && cx < TERM_COLS && cy >= 0 && cy < TERM_ROWS) {
-                int c_x_px = cx * char_w;
-                int c_y_px = y_start + (cy * line_h);
-                char cursorChar = ' ';
-                const char* line = term.getLine(cy);
-                // Simple bounds check for line length to pick character under cursor
-                // But getLine returns a fixed width buffer or null terminated?
-                // Assuming it's valid.
-                int len = 0;
-                while(line[len] != 0 && len < TERM_COLS) len++;
+                int c_x_px = cx * termCharW;
+                int c_y_px = termYStart + (cy * termLineH);
                 
-                if (cx < len) cursorChar = line[cx];
+                // Cursor visibility check against partial window
+                bool skipCursor = false;
+                if (partial) {
+                    if (c_y_px + termLineH < winY || c_y_px - 8 > (winY + winH)) skipCursor = true;
+                }
                 
-                display.fillRect(c_x_px, c_y_px - 8, char_w, line_h, GxEPD_BLACK);
-                u8g2.setFontMode(1);
-                u8g2.setForegroundColor(GxEPD_WHITE);
-                u8g2.setBackgroundColor(GxEPD_BLACK);
-                u8g2.setCursor(c_x_px, c_y_px);
-                u8g2.print(cursorChar);
+                if (!skipCursor) {
+                    char cursorChar = ' ';
+                    const char* line = term.getLine(cy);
+                    int len = 0;
+                    while(line[len] != 0 && len < TERM_COLS) len++;
+                    
+                    if (cx < len) cursorChar = line[cx];
+                    
+                    display.fillRect(c_x_px, c_y_px - 8, termCharW, termLineH, GxEPD_BLACK);
+                    u8g2.setForegroundColor(GxEPD_WHITE);
+                    u8g2.setBackgroundColor(GxEPD_BLACK);
+                    u8g2.setCursor(c_x_px, c_y_px);
+                    u8g2.print(cursorChar);
+                }
             }
-        }    
+        }
     });
 }
 

@@ -3,6 +3,11 @@
 #include "app.h"
 
 void AppTerminalState::enter(App& app) {
+    // Perform a Full Refresh Clear to remove ghosting from previous states
+    app.display().lock();
+    app.display().fullClean();
+    app.display().unlock();
+    
     // Nothing special on enter, connection is handled by App::connectToServer for now
     app.drawTerminalScreen(false); // Full refresh on enter
 }

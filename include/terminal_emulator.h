@@ -33,9 +33,25 @@ public:
     bool isCursorVisible() const { return show_cursor; }
     
     bool needsUpdate() const { return need_display_update; }
-    void clearUpdateFlag() { need_display_update = false; }
+    void clearUpdateFlag();
     bool isAppCursorMode() const { return application_cursor_mode; }
     
+    // Check specifically which rows are dirty
+    bool isRowDirty(int row) const { return (row >= 0 && row < TERM_ROWS) ? dirty_rows[row] : false; }
+    
+    // Get the range of dirty rows. Returns false if no rows are dirty.
+    bool getDirtyRange(int& startRow, int& endRow) const {
+        startRow = -1;
+        endRow = -1;
+        for (int i = 0; i < TERM_ROWS; i++) {
+            if (dirty_rows[i]) {
+                if (startRow == -1) startRow = i;
+                endRow = i;
+            }
+        }
+        return (startRow != -1);
+    }
+
 private:
     void _appendCharImpl(char c);
     
@@ -65,7 +81,8 @@ private:
     bool application_cursor_mode; // DECCKM
     
     bool need_display_update;
-    
+    bool dirty_rows[TERM_ROWS]; // Track dirty rows
+
     // ANSI parsing state
     enum AnsiState {
         ANSI_NORMAL,

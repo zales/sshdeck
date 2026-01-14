@@ -15,12 +15,20 @@ TerminalEmulator::TerminalEmulator()
     for (int i = 0; i < TERM_ROWS; i++) {
         memset(lines_primary[i], 0, TERM_COLS + 1);
         memset(lines_alt[i], 0, TERM_COLS + 1);
+        dirty_rows[i] = true; // Initially all dirty 
         for (int j = 0; j < TERM_COLS; j++) {
             attrs_primary[i][j].inverse = false;
             attrs_alt[i][j].inverse = false;
         }
     }
     _mutex = xSemaphoreCreateMutex();
+}
+
+void TerminalEmulator::clearUpdateFlag() {
+    need_display_update = false;
+    for (int i = 0; i < TERM_ROWS; i++) {
+        dirty_rows[i] = false;
+    }
 }
 
 void TerminalEmulator::switchBuffer(bool alt) {
@@ -35,6 +43,7 @@ void TerminalEmulator::switchBuffer(bool alt) {
         term_attrs = attrs_primary;
     }
     need_display_update = true;
+    for(int i=0; i<TERM_ROWS; i++) dirty_rows[i] = true;
 }
 
 void TerminalEmulator::appendChar(char c) {
@@ -48,6 +57,9 @@ void TerminalEmulator::_appendCharImpl(char c) {
         return;
     }
     
+    // Mark current row dirty if we are about to write or move cursor in a way that needs redraw
+    dirty_rows[cursor_y] = true;
+
     if (c == '\r') {
         cursor_x = 0;
         return;
@@ -57,8 +69,11 @@ void TerminalEmulator::_appendCharImpl(char c) {
         cursor_x = 0;
         if (cursor_y == scrollBottom) {
              scrollUp();
+             // Scrolling invalidates the whole scroll region
+             for(int i=scrollTop; i<=scrollBottom; i++) dirty_rows[i] = true;
         } else if (cursor_y < TERM_ROWS - 1) {
              cursor_y++;
+             dirty_rows[cursor_y] = true; // New row is dirty
         }
         need_display_update = true;
         return;
@@ -67,6 +82,7 @@ void TerminalEmulator::_appendCharImpl(char c) {
     if (c == 0x08) {  // Backspace
         if (cursor_x > 0) {
             cursor_x--;
+            dirty_rows[cursor_y] = true;
         }
         return;
     }
@@ -86,11 +102,13 @@ void TerminalEmulator::_appendCharImpl(char c) {
              cursor_x++;
         }
         need_display_update = true;
+        dirty_rows[cursor_y] = true;
         return;
     }
     
     // Printable character
     if (c >= 32 && c < 127) {
+        dirty_rows[cursor_y] = true;
         char display_char = c;
         if (use_line_drawing) {
              // Simple fallback map
@@ -151,6 +169,7 @@ void TerminalEmulator::clear() {
         for (int j = 0; j < TERM_COLS; j++) {
             term_attrs[i][j].inverse = false;
         }
+        dirty_rows[i] = true;
     }
     cursor_x = 0;
     cursor_y = 0;
@@ -359,12 +378,14 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
             {
                 int r = GET_PARAM(0, 1);
                 int c = GET_PARAM(1, 1);
+                dirty_rows[cursor_y] = true; // Mark OLD cursor row dirty
                 cursor_y = r - 1;
                 cursor_x = c - 1;
                 if (cursor_y < 0) cursor_y = 0;
                 if (cursor_y >= TERM_ROWS) cursor_y = TERM_ROWS - 1;
                 if (cursor_x < 0) cursor_x = 0;
                 if (cursor_x >= TERM_COLS) cursor_x = TERM_COLS - 1;
+                dirty_rows[cursor_y] = true; // Mark NEW cursor row dirty
                 need_display_update = true;
             }
             break;
@@ -372,8 +393,10 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'A':  // Cursor up
             {
                 int n = GET_PARAM(0, 1);
+                dirty_rows[cursor_y] = true; // Mark OLD cursor row dirty
                 cursor_y -= n;
                 if (cursor_y < 0) cursor_y = 0;
+                dirty_rows[cursor_y] = true; // Mark NEW cursor row dirty
                 need_display_update = true;
             }
             break;
@@ -381,8 +404,10 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'B':  // Cursor down
             {
                 int n = GET_PARAM(0, 1);
+                dirty_rows[cursor_y] = true; // Mark OLD cursor row dirty
                 cursor_y += n;
                 if (cursor_y >= TERM_ROWS) cursor_y = TERM_ROWS - 1;
+                dirty_rows[cursor_y] = true; // Mark NEW cursor row dirty
                 need_display_update = true;
             }
             break;
@@ -390,8 +415,10 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'C':  // Cursor forward
             {
                 int n = GET_PARAM(0, 1);
+                dirty_rows[cursor_y] = true; // Mark OLD cursor row dirty
                 cursor_x += n;
                 if (cursor_x >= TERM_COLS) cursor_x = TERM_COLS - 1;
+                dirty_rows[cursor_y] = true; // Mark NEW cursor row dirty
                 need_display_update = true;
             }
             break;
@@ -399,8 +426,10 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'D':  // Cursor back
             {
                 int n = GET_PARAM(0, 1);
+                dirty_rows[cursor_y] = true; // Mark OLD cursor row dirty
                 cursor_x -= n;
                 if (cursor_x < 0) cursor_x = 0;
+                dirty_rows[cursor_y] = true; // Mark NEW cursor row dirty
                 need_display_update = true;
             }
             break;
@@ -408,9 +437,11 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'G': // Cursor Horizontal Absolute
              {
                 int n = GET_PARAM(0, 1);
+                dirty_rows[cursor_y] = true; // Mark OLD cursor row dirty
                 cursor_x = n - 1;
                 if (cursor_x < 0) cursor_x = 0;
                 if (cursor_x >= TERM_COLS) cursor_x = TERM_COLS - 1;
+                dirty_rows[cursor_y] = true; // Mark NEW cursor row dirty
                 need_display_update = true;
              }
              break;
@@ -418,9 +449,11 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'd': // Line Position Absolute
              {
                 int n = GET_PARAM(0, 1);
+                dirty_rows[cursor_y] = true; // Mark OLD cursor row dirty
                 cursor_y = n - 1;
                 if (cursor_y < 0) cursor_y = 0;
                 if (cursor_y >= TERM_ROWS) cursor_y = TERM_ROWS - 1;
+                dirty_rows[cursor_y] = true; // Mark NEW cursor row dirty
                 need_display_update = true;
              }
              break;
@@ -439,6 +472,8 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                          term_lines[i][0] = '\0';
                          for(int j=0; j<TERM_COLS; j++) term_attrs[i][j] = {false};
                      }
+                     // Mark affected rows dirty
+                     for (int i = cursor_y; i <= bottom; i++) dirty_rows[i] = true;
                 }
                 need_display_update = true;
             }
@@ -457,6 +492,8 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                          term_lines[i][0] = '\0';
                          for (int j = 0; j < TERM_COLS; j++) term_attrs[i][j] = {false};
                      }
+                     // Mark affected rows dirty
+                     for (int i = cursor_y; i <= bottom; i++) dirty_rows[i] = true;
                 }
                 need_display_update = true;
             }
@@ -466,6 +503,7 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case '@': // Insert Character
             {
                 int n = GET_PARAM(0, 1);
+                dirty_rows[cursor_y] = true;
                 char* line = term_lines[cursor_y];
                 int len = strlen(line);
                 
@@ -520,6 +558,7 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'P': // Delete Character
              {
                 int n = GET_PARAM(0, 1);
+                dirty_rows[cursor_y] = true;
                 char* line = term_lines[cursor_y];
                 int len = strlen(line);
                 
@@ -548,6 +587,7 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'X': // Erase Character
              {
                  int n = GET_PARAM(0, 1);
+                 dirty_rows[cursor_y] = true;
                  char* line = term_lines[cursor_y];
                  int len = strlen(line);
                  
@@ -572,6 +612,7 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                 int mode = GET_PARAM(0, 0);
                 if (mode == 0) {
                     // Clear from cursor to end
+                    dirty_rows[cursor_y] = true;
                     char* line = term_lines[cursor_y];
                     int len = strlen(line);
                     
@@ -586,14 +627,17 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                     for (int i = cursor_y + 1; i < TERM_ROWS; i++) {
                         term_lines[i][0] = '\0';
                         for(int j=0; j<TERM_COLS; j++) term_attrs[i][j] = {false};
+                        dirty_rows[i] = true;
                     }
                 } else if (mode == 1) {
                     // Start of screen to cursor
                     for (int i = 0; i < cursor_y; i++) {
                          term_lines[i][0] = '\0';
                          for(int j=0; j<TERM_COLS; j++) term_attrs[i][j]={false};
+                         dirty_rows[i] = true;
                     }
                     
+                    dirty_rows[cursor_y] = true;
                     char* line = term_lines[cursor_y];
                     int len = strlen(line);
                     // Ensure padding up to cursor
@@ -618,6 +662,7 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
         case 'K':  // Erase line
             {
                 int mode = GET_PARAM(0, 0);
+                dirty_rows[cursor_y] = true;
                 if (mode == 0) {
                     // Clear from cursor to end of line
                     char* line = term_lines[cursor_y];
@@ -748,6 +793,10 @@ void TerminalEmulator::scrollUp() {
     for (int j = 0; j < TERM_COLS; j++) {
         term_attrs[scrollBottom][j].inverse = false;
     }
+    // Mark affected rows as dirty
+    for (int i = scrollTop; i <= scrollBottom; i++) {
+        dirty_rows[i] = true;
+    }
     need_display_update = true;
 }
 
@@ -761,6 +810,10 @@ void TerminalEmulator::scrollDown() {
     term_lines[scrollTop][0] = '\0';
     for (int j = 0; j < TERM_COLS; j++) {
         term_attrs[scrollTop][j].inverse = false;
+    }
+    // Mark affected rows as dirty
+    for (int i = scrollTop; i <= scrollBottom; i++) {
+        dirty_rows[i] = true;
     }
     need_display_update = true;
 }
