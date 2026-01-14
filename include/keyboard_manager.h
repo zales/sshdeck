@@ -5,6 +5,11 @@
 #include <Adafruit_TCA8418.h>
 #include "config.h"
 
+enum SystemEvent {
+    SYS_EVENT_NONE,
+    SYS_EVENT_SLEEP
+};
+
 /**
  * @brief Keyboard Manager for TCA8418 keyboard controller
  * Handles keyboard initialization, event processing, and key mapping
@@ -14,6 +19,10 @@ public:
     KeyboardManager();
     
     bool begin();
+    void loop(); // System loop for handling side buttons etc
+
+    SystemEvent getSystemEvent();
+    
     bool isKeyPressed();
     int available(); // Check number of events in buffer
     char getKeyChar();
@@ -30,19 +39,23 @@ public:
     void toggleBacklight();
     void setBacklight(bool on);
 
-    void loop() {} // No-op, task handles inputs
-
-    // Queue item structure
-    struct KeyEvent {
-        char key;
-        uint8_t modifiers; // 0=None, 1=Shift, 2=Ctrl/Mic, 4=Alt, 8=Sym
-    };
+    // Trackball / Click
+    bool isTrackballPressed();
 
 private:
     Adafruit_TCA8418 keypad;
     QueueHandle_t hapticQueue;
     QueueHandle_t inputQueue;
     TaskHandle_t inputTaskHandle;
+    
+    // State
+    unsigned long pwrBtnStart;
+
+    // Queue item structure
+    struct KeyEvent {
+        char key;
+        uint8_t modifiers; // 0=None, 1=Shift, 2=Ctrl/Mic, 4=Alt, 8=Sym
+    };
     
     static void hapticTask(void* parameter);
     static void inputTask(void* parameter);

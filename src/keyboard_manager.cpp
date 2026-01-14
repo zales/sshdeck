@@ -15,7 +15,32 @@ void IRAM_ATTR KeyboardManager::isr() {
 }
 
 KeyboardManager::KeyboardManager() 
-    : sym_active(false), shift_active(false), ctrl_active(false), alt_active(false) {
+    : sym_active(false), shift_active(false), ctrl_active(false), alt_active(false), pwrBtnStart(0) {
+}
+
+void KeyboardManager::loop() {
+    // Check Hardware Button (Side Button / Boot Button)
+    if (digitalRead(BOARD_BOOT_PIN) == LOW) {
+        if (pwrBtnStart == 0) {
+            pwrBtnStart = millis();
+        } 
+    } else {
+        pwrBtnStart = 0;
+    }
+}
+
+SystemEvent KeyboardManager::getSystemEvent() {
+    // Check if Side Button held for sleep
+    if (pwrBtnStart > 0 && millis() - pwrBtnStart > 1000) {
+         pwrBtnStart = 0; // Reset to avoid repeated trigger
+         return SYS_EVENT_SLEEP;
+    }
+    return SYS_EVENT_NONE;
+}
+
+bool KeyboardManager::isTrackballPressed() {
+    // TODO: Define trackball click pin
+    return false; 
 }
 
 bool KeyboardManager::begin() {

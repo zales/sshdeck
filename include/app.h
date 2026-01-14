@@ -44,14 +44,13 @@ private:
 
     // State
     AppState currentState;
-    unsigned long pwrBtnStart;
     unsigned long lastAniUpdate;
     unsigned long lastScreenRefresh;
 
     // Helper Methods
     void initializeHardware();
     void enterDeepSleep();
-    void checkPowerButton();
+    void checkSystemInput();
     void unlockSystem();
 
     // UI & Logic

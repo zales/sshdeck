@@ -4,11 +4,8 @@
 #include <driver/rtc_io.h>
 #include "board_def.h"
 
-// Hardware Constants
-#define PIN_BOOT_BUTTON 0
-
 App::App() 
-    : wifi(terminal, keyboard, display, power), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), pwrBtnStart(0), lastAniUpdate(0), lastScreenRefresh(0) {
+    : wifi(terminal, keyboard, display, power), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0) {
 }
 
 void App::setup() {
@@ -29,7 +26,7 @@ void App::setup() {
     menu = new MenuSystem(ui, keyboard);
     // Bind member function via lambda
     menu->setIdleCallback([this]() { 
-        this->checkPowerButton(); 
+        this->checkSystemInput(); 
         ui.updateStatusState(power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
     });
     
@@ -46,7 +43,7 @@ void App::initializeHardware() {
         Serial.println("=================================\n");
     }
 
-    pinMode(PIN_BOOT_BUTTON, INPUT_PULLUP);
+    pinMode(BOARD_BOOT_PIN, INPUT_PULLUP);
 
     // Initialize power pins
     Serial.println("Initializing power...");
@@ -98,7 +95,9 @@ void App::initializeHardware() {
 void App::loop() {
     ota.loop();
     keyboard.loop();
-    checkPowerButton();
+    if (keyboard.getSystemEvent() == SYS_EVENT_SLEEP) {
+        enterDeepSleep();
+    }
 
     if (currentState == STATE_MENU) {
         handleMainMenu();
@@ -150,17 +149,6 @@ void App::handleMainMenu() {
     }
 }
 
-void App::checkPowerButton() {
-    if (digitalRead(PIN_BOOT_BUTTON) == LOW) {
-        if (pwrBtnStart == 0) {
-            pwrBtnStart = millis();
-        } else if (millis() - pwrBtnStart > 1000) { 
-            enterDeepSleep();
-        }
-    } else {
-        pwrBtnStart = 0;
-    }
-}
 
 void App::handleSystemUpdate() {
     if (WiFi.status() != WL_CONNECTED) {
@@ -234,8 +222,8 @@ void App::enterDeepSleep() {
 
     delay(1000);
 
-    pinMode(PIN_BOOT_BUTTON, INPUT_PULLUP);
-    while(digitalRead(PIN_BOOT_BUTTON) == LOW) {
+    pinMode(BOARD_BOOT_PIN, INPUT_PULLUP);
+    while(digitalRead(BOARD_BOOT_PIN) == LOW) {
         delay(50);
     }
 
@@ -247,13 +235,19 @@ void App::enterDeepSleep() {
     if (BOARD_6609_EN >= 0) digitalWrite(BOARD_6609_EN, LOW);
     digitalWrite(BOARD_POWERON, LOW);
 
-    esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BOOT_BUTTON, 0); 
-    rtc_gpio_pullup_en((gpio_num_t)PIN_BOOT_BUTTON);
-    rtc_gpio_pulldown_dis((gpio_num_t)PIN_BOOT_BUTTON);
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)BOARD_BOOT_PIN, 0); 
+    rtc_gpio_pullup_en((gpio_num_t)BOARD_BOOT_PIN);
+    rtc_gpio_pulldown_dis((gpio_num_t)BOARD_BOOT_PIN);
 
     esp_deep_sleep_start();
 }
 
+void App::checkSystemInput() {
+    keyboard.loop();
+    if (keyboard.getSystemEvent() == SYS_EVENT_SLEEP) {
+        enterDeepSleep();
+    }
+}
 
 void App::drawTerminalScreen() {
     // Construct Title for status bar
@@ -299,7 +293,12 @@ void App::connectToServer(const String& host, int port, const String& user, cons
     sshClient->setHelpCallback([this]() { this->showHelpScreen(); });
 
     if (WiFi.status() != WL_CONNECTED) {
-            wifi.setIdleCallback([this]() { this->checkPowerButton(); });
+            wifi.setIdleCallback([this]() { 
+                keyboard.loop();
+                if (keyboard.getSystemEvent() == SYS_EVENT_SLEEP) {
+                    enterDeepSleep();
+                }
+            });
             if (!wifi.connect()) {
                 menu->drawMessage("Error", "WiFi Failed");
                 return;
@@ -419,7 +418,7 @@ void App::handleSettings() {
             handleChangePin();
         } 
         else if (choice == 1) {
-             wifi.setIdleCallback([this]() { this->checkPowerButton(); });
+             wifi.setIdleCallback([this]() { this->checkSystemInput(); });
              wifi.manage();
         } 
         else if (choice == 2) {
@@ -457,7 +456,7 @@ void App::handleChangePin() {
     // 1. Enter New PIN
     while (true) {
         ui.drawPinEntry("CHANGE PIN", "Enter New PIN:", newPin);
-        while(!keyboard.available()) { delay(10); checkPowerButton(); }
+        while(!keyboard.available()) { delay(10); checkSystemInput(); }
         char key = keyboard.getKeyChar();
         if (key == '\n' || key == '\r') { if (newPin.length() > 0) break; }
         else if (key == 0x08) { if (newPin.length() > 0) newPin.remove(newPin.length()-1); }
@@ -468,7 +467,7 @@ void App::handleChangePin() {
     String confirmPin = "";
     while (true) {
         ui.drawPinEntry("CHANGE PIN", "Confirm New PIN:", confirmPin);
-        while(!keyboard.available()) { delay(10); checkPowerButton(); }
+        while(!keyboard.available()) { delay(10); checkSystemInput(); }
         char key = keyboard.getKeyChar();
         if (key == '\n' || key == '\r') { if (confirmPin.length() > 0) break; }
         else if (key == 0x08) { if (confirmPin.length() > 0) confirmPin.remove(confirmPin.length()-1); }
@@ -539,7 +538,7 @@ void App::handleStorage() {
     
     // Set idle callback to check for host ejection
     menu->setIdleCallback([this]() {
-        this->checkPowerButton();
+        this->checkSystemInput();
         if (storage.isEjectRequested()) {
             storage.clearEjectRequest();
              ui.drawMessage("DISCONNECTED", "Safe to remove");
@@ -600,7 +599,7 @@ void App::handleStorage() {
             if (usbActive) {
                 exitStorageMode();
             }
-            menu->setIdleCallback([this](){ this->checkPowerButton(); });
+            menu->setIdleCallback([this](){ this->checkSystemInput(); });
             return;
         }
     }
@@ -609,7 +608,7 @@ void App::handleStorage() {
 void App::exitStorageMode() {
     storage.stopUSBMode();
     // Reset idle callback
-    if (menu) menu->setIdleCallback([this](){ this->checkPowerButton(); });
+    if (menu) menu->setIdleCallback([this](){ this->checkSystemInput(); });
     
     // Restart for full USB Stack reset
     ui.drawMessage("Restarting...", "Switching Mode");
