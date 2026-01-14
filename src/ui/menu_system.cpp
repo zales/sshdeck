@@ -1,8 +1,8 @@
 #include "ui/menu_system.h"
 #include "board_def.h"
 
-MenuSystem::MenuSystem(DisplayManager& d, KeyboardManager& k) 
-    : display(d), keyboard(k) {
+MenuSystem::MenuSystem(UIManager& u, KeyboardManager& k) 
+    : ui(u), keyboard(k) {
 }
 
 void MenuSystem::setIdleCallback(std::function<void()> callback) {
@@ -14,17 +14,16 @@ int MenuSystem::showMenu(const String& title, const std::vector<String>& items) 
     bool needsRedraw = true;
     
     // Clear keyboard buffer
-    while(keyboard.available()) keyboard.getKeyChar();
+    keyboard.clearBuffer(); 
     
     while (true) {
         if (idleCallback) idleCallback();
 
         if (needsRedraw) {
-            display.setRefreshMode(true); // Partial refresh for speed
-            display.firstPage();
-            do {
-                renderMenu(title, items, selected);
-            } while (display.nextPage());
+            ui.setRefreshMode(true); // Partial refresh
+            ui.render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+                renderMenu(title, items, selected, u8g2);
+            });
             needsRedraw = false;
         }
         
@@ -32,29 +31,17 @@ int MenuSystem::showMenu(const String& title, const std::vector<String>& items) 
         if (keyboard.available()) {
             char c = keyboard.getKeyChar();
             
-            // Handle Navigation (Simulating with keys for now if no dedicated arrow keys mapped well)
-            // Assuming 'w'/'s' or actual arrow mapping from keyboard manager
-            // Check KeyboardManager mappings: 
-            // w=Up, s=Down, Enter=Select, Backspace/Esc=Cancel
-            
-            if (c == 0) continue; // Modifier change or release
+            if (c == 0) continue; 
 
             bool handled = false;
-
-            // Simple navigation mapping
             bool up = false;
             bool down = false;
             
-            // W / S (Standard WASD)
             if (c == 'w') up = true;
             if (c == 's') down = true;
-            
-            // Mic + W/S (Ctrl) - consistent with Terminal navigation
             if (c == 'w' && keyboard.isMicActive()) up = true;
             if (c == 's' && keyboard.isMicActive()) down = true;
             
-            // Alt + P/N (Legacy support removed for clarity)
-
             if (up) { 
                  selected--;
                  if (selected < 0) selected = items.size() - 1;
@@ -82,41 +69,23 @@ int MenuSystem::showMenu(const String& title, const std::vector<String>& items) 
     }
 }
 
-void MenuSystem::renderMenu(const String& title, const std::vector<String>& items, int selectedIndex) {
-    display.clear();
+void MenuSystem::renderMenu(const String& title, const std::vector<String>& items, int selectedIndex, U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+    // ui.render already clears and sets default colors
     
-    int w = display.getWidth();
-    int h = display.getHeight();
-    
-    U8G2_FOR_ADAFRUIT_GFX& u8g2 = display.getFonts();
-    u8g2.setFontMode(1); // Transparent
-    u8g2.setFontDirection(0);
+    int w = ui.width();
+    int h = ui.height();
     
     // --- Header ---
-    display.fillRect(0, 0, w, 24, GxEPD_BLACK);
-    u8g2.setForegroundColor(GxEPD_WHITE);
-    u8g2.setBackgroundColor(GxEPD_BLACK);
-    u8g2.setFont(u8g2_font_helvB12_tr);
-    
-    // Center Title
-    int titleW = u8g2.getUTF8Width(title.c_str());
-    int titleX = (w - titleW) / 2;
-    if (titleX < 5) titleX = 5;
-    u8g2.setCursor(titleX, 18);
-    u8g2.print(title);
+    ui.drawHeader(title);
     
     // --- Items ---
     u8g2.setForegroundColor(GxEPD_BLACK);
     u8g2.setBackgroundColor(GxEPD_WHITE);
     u8g2.setFont(u8g2_font_helvR12_tr);
     
-    int startY = 40;
+    int startY = 32; // Adjusted for smaller header (16px)
     int lineH = 22;
-    int maxItems = (h - startY - 20) / lineH; // Leave room for footer
-    
-    // Scroll window logic could be added here if items > maxItems
-    // For now, let's assume simple sliding window if needed, or just basic clip
-    // Basic Scrolling: Ensure selectedIndex is visible.
+    int maxItems = (h - startY - 20) / lineH; 
     
     int offset = 0;
     if (items.size() > maxItems) {
@@ -132,7 +101,7 @@ void MenuSystem::renderMenu(const String& title, const std::vector<String>& item
         int y = startY + (i * lineH) + 16;
         
         if (idx == selectedIndex) {
-            display.fillRect(2, startY + (i * lineH), w-4, lineH, GxEPD_BLACK);
+            ui.fillRect(2, startY + (i * lineH), w-4, lineH, GxEPD_BLACK);
             u8g2.setForegroundColor(GxEPD_WHITE);
             u8g2.setBackgroundColor(GxEPD_BLACK);
         } else {
@@ -141,38 +110,37 @@ void MenuSystem::renderMenu(const String& title, const std::vector<String>& item
         }
         
         u8g2.setCursor(10, y);
-        u8g2.print(items[idx]); // Clip text if too long?
+        u8g2.print(items[idx]);
     }
     
     // --- Footer ---
     int footerH = 16;
-    display.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
+    ui.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
     u8g2.setForegroundColor(GxEPD_WHITE);
     u8g2.setBackgroundColor(GxEPD_BLACK);
-    u8g2.setFont(u8g2_font_profont12_tr); // Smaller font for footer
+    u8g2.setFont(u8g2_font_profont12_tr);
     u8g2.setCursor(5, h - 4);
     
     if (items.size() > maxItems) {
-         u8g2.print("Scroll: W/S | Select: Enter | Back: Esc");
+         u8g2.print("W/S:Scroll Ent:Sel Esc:Back");
     } else {
-         u8g2.print("Nav: W/S | Select: Enter | Back: Esc");
+         u8g2.print("W/S:Move Ent:Sel Esc:Back");
     }
 }
 
 bool MenuSystem::textInput(const String& title, String& result, bool isPassword) {
     bool needsRedraw = true;
     
-    while(keyboard.available()) keyboard.getKeyChar(); // Flush
+    keyboard.clearBuffer();
     
     while (true) {
         if (idleCallback) idleCallback();
 
         if (needsRedraw) {
-            display.setRefreshMode(true);
-            display.firstPage();
-            do {
-                renderInput(title, result); // pass raw result so we can mask if needed render-side
-            } while (display.nextPage());
+            ui.setRefreshMode(true);
+            ui.render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+                renderInput(title, result, u8g2);
+            });
             needsRedraw = false;
         }
         
@@ -180,7 +148,6 @@ bool MenuSystem::textInput(const String& title, String& result, bool isPassword)
             char c = keyboard.getKeyChar();
             
             if (c == '\n') return true;
-            // ESC (0x1B), Ctrl+C (0x03), Ctrl+Q (0x11)
             if (c == 0x1B || c == 0x03 || c == 0x11) return false; 
             
             if (c == 0x08) { // Backspace
@@ -197,14 +164,12 @@ bool MenuSystem::textInput(const String& title, String& result, bool isPassword)
     }
 }
 
-void MenuSystem::renderInput(const String& title, const String& currentText) {
-    display.clear();
-    int w = display.getWidth();
-    
-    U8G2_FOR_ADAFRUIT_GFX& u8g2 = display.getFonts();
+void MenuSystem::renderInput(const String& title, const String& currentText, U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+    int w = ui.width();
+    int h = ui.height();
     
     // Title
-    display.fillRect(0, 0, w, 24, GxEPD_BLACK);
+    ui.fillRect(0, 0, w, 24, GxEPD_BLACK);
     u8g2.setForegroundColor(GxEPD_WHITE);
     u8g2.setBackgroundColor(GxEPD_BLACK);
     u8g2.setFont(u8g2_font_helvB12_tr);
@@ -215,22 +180,21 @@ void MenuSystem::renderInput(const String& title, const String& currentText) {
     u8g2.setForegroundColor(GxEPD_BLACK);
     u8g2.setBackgroundColor(GxEPD_WHITE);
     int boxW = w - 20;
-    display.fillRect(10, 50, boxW, 30, GxEPD_WHITE);
-    // Draw border (simple rects)
-    display.fillRect(10, 50, boxW, 2, GxEPD_BLACK);      // Top
-    display.fillRect(10, 80, boxW, 2, GxEPD_BLACK);      // Bottom
-    display.fillRect(10, 50, 2, 32, GxEPD_BLACK);        // Left
-    display.fillRect(10 + boxW - 2, 50, 2, 32, GxEPD_BLACK); // Right
+    ui.fillRect(10, 50, boxW, 30, GxEPD_WHITE);
+    // Draw border
+    ui.fillRect(10, 50, boxW, 2, GxEPD_BLACK);      // Top
+    ui.fillRect(10, 80, boxW, 2, GxEPD_BLACK);      // Bottom
+    ui.fillRect(10, 50, 2, 32, GxEPD_BLACK);        // Left
+    ui.fillRect(10 + boxW - 2, 50, 2, 32, GxEPD_BLACK); // Right
 
     u8g2.setFont(u8g2_font_helvR12_tr);
     u8g2.setCursor(15, 72);
     u8g2.print(currentText);
-    u8g2.print("_"); // Cursor
+    u8g2.print("_"); 
 
     // Footer
-    int h = display.getHeight();
     int footerH = 16;
-    display.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
+    ui.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
     u8g2.setForegroundColor(GxEPD_WHITE);
     u8g2.setBackgroundColor(GxEPD_BLACK);
     u8g2.setFont(u8g2_font_profont12_tr); 
@@ -239,40 +203,10 @@ void MenuSystem::renderInput(const String& title, const String& currentText) {
 }
 
 void MenuSystem::drawMessage(const String& title, const String& msg) {
-    display.setRefreshMode(false);
-    display.firstPage();
-    do {
-         display.clear();
-         int w = display.getWidth();
-         int h = display.getHeight();
-         U8G2_FOR_ADAFRUIT_GFX& u8g2 = display.getFonts();
-         
-         display.fillRect(0, 0, w, 24, GxEPD_BLACK);
-         u8g2.setForegroundColor(GxEPD_WHITE);
-         u8g2.setBackgroundColor(GxEPD_BLACK);
-         u8g2.setFont(u8g2_font_helvB12_tr);
-         u8g2.setCursor(5, 18);
-         u8g2.print(title);
-         
-         u8g2.setForegroundColor(GxEPD_BLACK);
-         u8g2.setBackgroundColor(GxEPD_WHITE);
-         u8g2.setFont(u8g2_font_helvR12_tr);
-         u8g2.setCursor(10, 50);
-         u8g2.print(msg);
-
-         // Footer
-        int footerH = 16;
-        display.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
-        u8g2.setForegroundColor(GxEPD_WHITE);
-        u8g2.setBackgroundColor(GxEPD_BLACK);
-        u8g2.setFont(u8g2_font_profont12_tr); 
-        u8g2.setCursor(5, h - 4);
-        u8g2.print("Press any key to close");
-
-    } while(display.nextPage());
-    delay(500); // Debounce
+    ui.drawMessage(title, msg);
     
     // Wait for key
+    delay(500);
     while(true) {
         if (idleCallback) idleCallback();
         if(keyboard.isKeyPressed()) {

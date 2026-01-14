@@ -14,6 +14,7 @@
 #include "security_manager.h"
 #include "storage_manager.h"
 #include "ota_manager.h"
+#include "power_manager.h"
 
 enum AppState {
     STATE_MENU,
@@ -39,18 +40,18 @@ private:
     SSHClient* sshClient;
     SecurityManager security;
     OtaManager ota;
+    PowerManager power;
 
     // State
     AppState currentState;
     unsigned long pwrBtnStart;
+    unsigned long lastAniUpdate;
+    unsigned long lastScreenRefresh;
 
     // Helper Methods
     void initializeHardware();
     void enterDeepSleep();
     void checkPowerButton();
-    float getBatteryVoltage();
-    int getBatteryPercentage();
-    bool isCharging();
     void unlockSystem();
 
     // UI & Logic
@@ -62,6 +63,7 @@ private:
     void handleSavedServers();
     void handleQuickConnect();
     void handleSettings();
+    void handleBatteryInfo();
     void handleChangePin();
     void handleStorage();
     void handleSystemUpdate();

@@ -75,7 +75,8 @@ void WifiSetup::refreshScreen() {
 
 // Helper to enter text using the MenuSystem's UI style
 String WifiSetup::readInput(const String& prompt, bool passwordMask) {
-    MenuSystem menu(display, keyboard);
+    UIManager ui(display);
+    MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
     String result = "";
     if (menu.textInput(prompt, result, passwordMask)) {
@@ -86,7 +87,8 @@ String WifiSetup::readInput(const String& prompt, bool passwordMask) {
 
 bool WifiSetup::connect() {
     loadCredentials();
-    MenuSystem menu(display, keyboard);
+    UIManager ui(display);
+    MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
 
     // Auto-connect attempt
@@ -280,7 +282,8 @@ void WifiSetup::scanAndSelect() {
     int n = WiFi.scanNetworks();
     
     if (n == 0) {
-        MenuSystem menu(display, keyboard);
+        UIManager ui(display);
+        MenuSystem menu(ui, keyboard);
         menu.drawMessage("Scan Results", "No Networks Found");
         return; 
     }
@@ -317,7 +320,8 @@ void WifiSetup::scanAndSelect() {
         return a.rssi > b.rssi;
     });
     
-    MenuSystem menu(display, keyboard);
+    UIManager ui(display);
+    MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
     while (true) {
         std::vector<String> labels;
@@ -407,7 +411,8 @@ void WifiSetup::deleteCredential(int index) {
 
 void WifiSetup::manage() {
     loadCredentials();
-    MenuSystem menu(display, keyboard);
+    UIManager ui(display);
+    MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
     
     while(true) {

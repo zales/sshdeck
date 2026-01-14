@@ -28,12 +28,9 @@ void UIManager::drawTitleBar(const String& title) {
 
 void UIManager::drawPinEntry(const String& title, const String& subtitle, const String& entry, bool isWrong) {
     display.setRefreshMode(true); // Ensure partial update mode
-    display.firstPage();
-    do {
-        display.clear();
-        drawTitleBar(title);
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        drawHeader(title);
 
-        auto& u8g2 = display.getFonts();
         // Subtitle
         u8g2.setForegroundColor(GxEPD_BLACK);
         u8g2.setBackgroundColor(GxEPD_WHITE);
@@ -61,76 +58,41 @@ void UIManager::drawPinEntry(const String& title, const String& subtitle, const 
         if (isWrong) {
              drawCenteredText(150, "INCORRECT PIN", u8g2_font_helvB10_tr);
         }
-
-    } while (display.nextPage());
+    });
 }
 
 void UIManager::drawMessage(const String& title, const String& message) {
     display.setRefreshMode(false);
-    display.firstPage();
-    do {
-        display.clear();
-        drawTitleBar(title);
-        auto& u8g2 = display.getFonts();
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        drawHeader(title);
         
         // Center the message roughly
         int msgY = height() / 2;
         drawCenteredText(msgY, message, u8g2_font_helvR12_tr);
         
-        // Footer
-        u8g2.setFont(u8g2_font_profont12_tr);
-        int footerH = 16;
-        display.fillRect(0, height() - footerH, width(), footerH, GxEPD_BLACK);
-        u8g2.setForegroundColor(GxEPD_WHITE);
-        u8g2.setBackgroundColor(GxEPD_BLACK);
-        u8g2.setCursor(5, height() - 4);
-        u8g2.print("Press Key");
-        
-    } while (display.nextPage());
+        drawFooter("Press Key");
+    });
 }
 
 void UIManager::drawSystemInfo(const String& ip, const String& bat, const String& ram, const String& mac) {
-    display.setRefreshMode(false);
-    display.firstPage();
-    do {
-        display.clear();
-        drawTitleBar("System Info");
-        auto& u8g2 = display.getFonts();
+    setRefreshMode(true); // Partial refresh for consistency
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        UILayout layout(*this, "System Info");
         
-        u8g2.setForegroundColor(GxEPD_BLACK);
-        u8g2.setBackgroundColor(GxEPD_WHITE);
-        u8g2.setFont(u8g2_font_helvR10_tr);
+        layout.addItem("IP:", ip);
+        layout.addItem("BAT:", bat);
+        layout.addItem("RAM:", ram);
+        layout.addItem("MAC:", mac);
         
-        int y = 60;
-        int x = 10;
-        int dy = 25;
-        
-        u8g2.setCursor(x, y); u8g2.print("IP:  " + ip); y += dy;
-        u8g2.setCursor(x, y); u8g2.print("BAT: " + bat); y += dy;
-        u8g2.setCursor(x, y); u8g2.print("RAM: " + ram); y += dy;
-        u8g2.setCursor(x, y); u8g2.print("MAC: " + mac); y += dy;
-        
-        int footerH = 16;
-        display.fillRect(0, height() - footerH, width(), footerH, GxEPD_BLACK);
-        u8g2.setForegroundColor(GxEPD_WHITE);
-        u8g2.setBackgroundColor(GxEPD_BLACK);
-        u8g2.setFont(u8g2_font_profont12_tr); 
-        u8g2.setCursor(5, height() - 4);
-        u8g2.print("Press Key to Close");
-        
-    } while (display.nextPage());
+        layout.addFooter("Press Key to Close");
+    });
 }
 
 void UIManager::drawShutdownScreen() {
     display.setRefreshMode(false);
-    display.firstPage();
-    do {
-        display.clear();
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         int w = width();
         int h = height();
-        
-        auto& u8g2 = display.getFonts();
-        display.fillRect(0, 0, w, h, GxEPD_WHITE);
         
         // Stylish black band
         int bandH = 80;
@@ -150,20 +112,14 @@ void UIManager::drawShutdownScreen() {
         u8g2.setBackgroundColor(GxEPD_WHITE);
         
         drawCenteredText(bandY + bandH + 30, "System Halted", u8g2_font_helvB10_tr);
-
-    } while (display.nextPage());
+    });
 }
 
 void UIManager::drawBootScreen(const String& line1, const String& line2) {
     display.setRefreshMode(false);
-    display.firstPage();
-    do {
-        display.clear();
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         int w = width();
         int h = height();
-        
-        auto& u8g2 = display.getFonts();
-        display.fillRect(0, 0, w, h, GxEPD_WHITE);
         
         // Stylish black band
         int bandH = 80;
@@ -175,32 +131,34 @@ void UIManager::drawBootScreen(const String& line1, const String& line2) {
         
         // Big Text inside band
         u8g2.setFont(u8g2_font_logisoso42_tr);
-        int tw = u8g2.getUTF8Width("SshDeck");
+        int tw = u8g2.getUTF8Width(line1.c_str());
         u8g2.setCursor((w - tw)/2, bandY + 55);
-        u8g2.print("SshDeck");
+        u8g2.print(line1);
         
         u8g2.setForegroundColor(GxEPD_BLACK);
         u8g2.setBackgroundColor(GxEPD_WHITE);
         
         drawCenteredText(bandY + bandH + 30, line2, u8g2_font_helvB10_tr);
-    } while (display.nextPage());
+    });
 }
 
-void UIManager::drawStatusBar(bool wifiConnected, const String& wifiSSID, 
-                              bool sshConnected, const String& sshHost, 
-                              int batteryPercent, float batteryVolts) {
-    // This is typically drawn as part of the terminal screen, but we can reuse the logic
-    // Implementation left simple for now or integrated into 'Common'
+void UIManager::updateStatusState(int bat, bool charging, bool wifi) {
+    currentBat = bat;
+    currentCharging = charging;
+    currentWifi = wifi;
 }
+
+void UIManager::drawStatusBar(const String& title, bool wifiConnected, int batteryPercent, bool isCharging) {
+    updateStatusState(batteryPercent, isCharging, wifiConnected);
+    drawHeader(title);
+}
+
 void UIManager::updateBootStatus(const String& status) {
-    display.setRefreshMode(true); // Partial refresh
-    display.firstPage();
-    do {
-        display.clear();
+    setRefreshMode(true); // Partial refresh
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         int w = width();
         int h = height();
         
-        auto& u8g2 = display.getFonts();
         display.fillRect(0, 0, w, h, GxEPD_WHITE);
         
         // Stylish black band (same as boot screen but using partial refresh context)
@@ -220,5 +178,138 @@ void UIManager::updateBootStatus(const String& status) {
         u8g2.setBackgroundColor(GxEPD_WHITE);
         
         drawCenteredText(bandY + bandH + 30, status, u8g2_font_helvB10_tr);
+    });
+}
+
+void UIManager::render(std::function<void(U8G2_FOR_ADAFRUIT_GFX&)> drawCallback) {
+    display.firstPage();
+    do {
+        display.clear(); // Always start with a clean slate
+        
+        // Reset defaults before callback
+        auto& u8g2 = display.getFonts();
+        u8g2.setFontMode(1);
+        u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
+        
+        // Execute User Drawing Logic
+        if (drawCallback) {
+            drawCallback(u8g2);
+        }
     } while (display.nextPage());
+}
+
+// --- Primitives ---
+
+void UIManager::drawHeader(const String& title) {
+    auto& u8g2 = display.getFonts();
+    int w = width();
+    int h = 16;
+    
+    display.fillRect(0, 0, w, h, GxEPD_BLACK);
+    
+    u8g2.setFont(u8g2_font_profont12_tf);
+    u8g2.setForegroundColor(GxEPD_WHITE);
+    u8g2.setBackgroundColor(GxEPD_BLACK);
+    
+    // Left: Title
+    u8g2.setCursor(2, h - 4);
+    u8g2.print(title);
+    
+    // Right: Status
+    String status = "";
+    if (currentWifi) status += "W ";
+    status += String(currentBat) + "%";
+    if (currentCharging) status += "+";
+    
+    int sw = u8g2.getUTF8Width(status.c_str());
+    u8g2.setCursor(w - sw - 2, h - 4);
+    u8g2.print(status);
+    
+    // Reset
+    u8g2.setForegroundColor(GxEPD_BLACK);
+    u8g2.setBackgroundColor(GxEPD_WHITE);
+}
+
+void UIManager::drawFooter(const String& message) {
+    auto& u8g2 = display.getFonts();
+    int h = 14;
+    // int y = height() - h;
+    
+    u8g2.setFont(u8g2_font_profont12_tf);
+    u8g2.setCursor(2, height() - 3);
+    u8g2.print(message);
+}
+
+void UIManager::drawTextLine(int x, int y, const String& text, const uint8_t* font, bool invert) {
+    auto& u8g2 = display.getFonts();
+    if (font) u8g2.setFont(font);
+    else u8g2.setFont(u8g2_font_profont12_tf);
+    
+    if (invert) {
+        u8g2.setForegroundColor(GxEPD_WHITE);
+        u8g2.setBackgroundColor(GxEPD_BLACK);
+    }
+    
+    u8g2.setCursor(x, y);
+    u8g2.print(text);
+    
+    if (invert) {
+        u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
+    }
+}
+
+void UIManager::drawLabelValue(int y, const String& label, const String& value) {
+    auto& u8g2 = display.getFonts();
+    u8g2.setFont(u8g2_font_profont12_tf);
+    
+    // Label Left
+    u8g2.setCursor(0, y);
+    u8g2.print(label);
+    
+    // Value Right
+    int valX = 60; 
+    u8g2.setCursor(valX, y);
+    u8g2.print(value);
+}
+
+// --- Layout Helper ---
+
+UILayout::UILayout(UIManager& mgr, const String& title) : ui(mgr), currentY(26) {
+    ui.drawHeader(title);
+}
+
+void UILayout::addText(const String& text) {
+    ui.drawTextLine(0, currentY, text);
+    currentY += 10;
+}
+
+void UILayout::addItem(const String& label, const String& value) {
+    ui.drawLabelValue(currentY, label, value);
+    currentY += 10;
+}
+
+void UILayout::addFooter(const String& text) {
+    ui.drawFooter(text);
+}
+
+void UILayout::space(int pixels) {
+    currentY += pixels;
+}
+
+void UIManager::setRefreshMode(bool partial) {
+    display.setRefreshMode(partial);
+}
+
+void UIManager::fillRect(int x, int y, int w, int h, uint16_t color) {
+    display.fillRect(x, y, w, h, color);
+}
+
+void UIManager::drawRect(int x, int y, int w, int h, uint16_t color) {
+    display.getDisplay().drawRect(x, y, w, h, color);
+}
+
+void UIManager::drawFastHLine(int x, int y, int w, uint16_t color) {
+    display.getDisplay().drawFastHLine(x, y, w, color);
 }

@@ -7,15 +7,17 @@
 #include "terminal_emulator.h"
 #include "keyboard_manager.h"
 #include "display_manager.h"
+#include "power_manager.h"
 #include <functional>
 
 class WifiManager {
 public:
-    WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp);
+    WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp, PowerManager& pwr);
     
     void setSecurityManager(SecurityManager* sec);
     
     void setIdleCallback(std::function<void()> cb);
+    std::function<void()> getIdleCallback() const { return idleCallback; }
     void setRenderCallback(std::function<void()> cb);
 
     // Attempt to connect using saved credentials or user selection
@@ -34,6 +36,7 @@ private:
     TerminalEmulator& terminal;
     KeyboardManager& keyboard;
     DisplayManager& display;
+    PowerManager& power;
     Preferences preferences;
     SecurityManager* security;
     

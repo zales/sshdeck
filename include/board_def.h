@@ -1,4 +1,8 @@
 #pragma once
+#include <Arduino.h>
+
+// Global I2C Mutex
+extern SemaphoreHandle_t i2cMutex;
 
 // Pin definitions for LilyGo T-Deck Pro (E-Paper Version)
 // Source: https://github.com/Xinyuan-LilyGO/T-Deck-Pro/blob/main/examples/factory/utilities.h

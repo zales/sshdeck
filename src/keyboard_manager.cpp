@@ -3,6 +3,17 @@
 #include "keymap.h"
 #include <Preferences.h>
 
+// Static handle for ISR
+static TaskHandle_t keyboardIntTask = NULL;
+
+void IRAM_ATTR KeyboardManager::isr() {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (keyboardIntTask != NULL) {
+        vTaskNotifyGiveFromISR(keyboardIntTask, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+}
+
 KeyboardManager::KeyboardManager() 
     : sym_active(false), shift_active(false), ctrl_active(false), alt_active(false) {
 }
@@ -24,27 +35,48 @@ bool KeyboardManager::begin() {
     ledcAttachPin(BOARD_VIBRATION, 0);
     ledcWrite(0, 0);
 
-    // Initialize I2C
-    Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
-    Wire.setClock(100000);
+    // I2C is already initialized in App::initializeHardware
+    // Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
+    // Wire.setClock(100000);
     
-    // Create Vibration Task
-    vibeQueue = xQueueCreate(10, sizeof(uint8_t));
-    xTaskCreate(
-        vibrationTask,    /* Task function. */
-        "VibeTask",       /* String with name of task. */
-        2048,             /* Stack size in bytes. */
-        this,             /* Parameter passed as input of the task */
-        1,                /* Priority of the task. */
-        NULL);            /* Task handle. */
+    // Create Queues
+    hapticQueue = xQueueCreate(10, sizeof(uint8_t));
+    inputQueue = xQueueCreate(32, sizeof(KeyEvent)); // Store up to 32 key events
+
+    // Create Haptic Task (Independent of I2C)
+    xTaskCreate(hapticTask, "HapticTask", 2048, this, 1, NULL);
+
+    // Initialize Keypad Hardware FIRST
+    if (!initializeKeypad()) {
+        Serial.println("Keyboard hardware init failed!");
+        return false;
+    }
+
+    // THEN Create Input Task (avoids race condition on I2C during init)
+    xTaskCreate(inputTask, "InputTask", 4096, this, 2, &inputTaskHandle);
     
-    return initializeKeypad();
+    // Register Task for ISR
+    keyboardIntTask = inputTaskHandle;
+    
+    // Attach Interrupt
+    pinMode(BOARD_KEYBOARD_INT, INPUT_PULLUP);
+    attachInterrupt(BOARD_KEYBOARD_INT, isr, FALLING);
+
+    return true;
 }
 
 bool KeyboardManager::initializeKeypad() {
+    // Wait for E-Ink power spikes to settle
+    delay(100);
+
     // Try to initialize with retries
     for (int retry = 0; retry < KEYBOARD_INIT_RETRIES; retry++) {
-        if (keypad.begin(TCA8418_DEFAULT_ADDR, &Wire)) {
+        
+        if (i2cMutex) xSemaphoreTake(i2cMutex, portMAX_DELAY);
+        bool success = keypad.begin(BOARD_I2C_ADDR_KEYBOARD, &Wire);
+        if (i2cMutex) xSemaphoreGive(i2cMutex);
+        
+        if (success) {
             keypad.matrix(KEY_ROWS, KEY_COLS);
             pinMode(BOARD_KEYBOARD_INT, INPUT_PULLUP);
             keypad.enableInterrupts();
@@ -53,53 +85,100 @@ bool KeyboardManager::initializeKeypad() {
             keypad.flush();
             return true;
         }
+
+        // Bus Recovery attempt if init failed
+        if (retry < KEYBOARD_INIT_RETRIES - 1) {
+             Wire.end();
+             delay(10);
+             Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL, 100000);
+             delay(20);
+        }
+        
         delay(KEYBOARD_INIT_RETRY_DELAY);
     }
     
     return false;
 }
 
+
+void KeyboardManager::inputTask(void* parameter) {
+    KeyboardManager* km = (KeyboardManager*)parameter;
+    
+    // We need to take the Mutex if we access I2C
+    // BUT checking interrupts is just a GPIO read (DigitalRead)
+    // The I2C only happens when we call keypad.getEvent()
+    
+    for(;;) {
+        // Wait for interrupt (blocking) - or timeout to act as failsafe polling (100ms)
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+        
+        // Process if INT pin is LOW (Active)
+        if (digitalRead(BOARD_KEYBOARD_INT) == LOW) {
+            
+            // Lock I2C before talking to chip
+            if (i2cMutex == NULL || xSemaphoreTake(i2cMutex, portMAX_DELAY) == pdTRUE) {
+                
+                int loopLimit = 10; // Avoid infinite loop
+                // ERROR FIX: Use keypad.available() (HW) not km->available() (Queue)
+                while (km->keypad.available() > 0 && loopLimit-- > 0) {
+                     
+                     int key_code = km->keypad.getEvent();
+                     if (key_code > 0) {
+                        bool pressed = (key_code & 0x80) != 0;
+                        int key = key_code & 0x7F;
+                        int key_index = key - 1;
+                        int row = key_index / KEY_COLS;
+                        int col = key_index % KEY_COLS;
+                        
+                        if (pressed) km->triggerHaptic();
+                        
+                        // Process modifiers & logic
+                        char c = km->processKeyEvent(row, col, pressed);
+                        
+                        if (c != 0) {
+                            KeyEvent evt;
+                            evt.key = c;
+                            evt.modifiers = 0; 
+                            if (km->isShiftActive()) evt.modifiers |= 1;
+                            if (km->isCtrlActive()) evt.modifiers |= 2;
+                            if (km->isAltActive()) evt.modifiers |= 4;
+                            if (km->isSymActive()) evt.modifiers |= 8;
+                            
+                            xQueueSend(km->inputQueue, &evt, 0); 
+                        }
+                     }
+                }
+                
+                if (i2cMutex != NULL) xSemaphoreGive(i2cMutex);
+            }
+        }
+        
+        // No delay needed if using notify - we wait at top of loop
+    }
+}
+
 bool KeyboardManager::isKeyPressed() {
-    return (digitalRead(BOARD_KEYBOARD_INT) == LOW && keypad.available() > 0);
+     // Check if we have items in the queue
+     return uxQueueMessagesWaiting(inputQueue) > 0;
 }
 
 int KeyboardManager::available() {
-    return keypad.available();
+    // This is used by internal logic. 
+    // BUT Adafruit_TCA8418::available() reads the register.
+    // If called from main thread, it conflicts with Task I2C usage.
+    // We should ONLY call this from the Task.
+    // Exposed 'available()' should return queue size.
+    return uxQueueMessagesWaiting(inputQueue);
 }
 
 char KeyboardManager::getKeyChar() {
-    if (!available()) {
-        return 0;
+    KeyEvent evt;
+    if (xQueueReceive(inputQueue, &evt, 0) == pdTRUE) {
+        return evt.key;
     }
-    
-    int key_code = keypad.getEvent();
-    if (key_code <= 0) {
-        return 0;
-    }
-    
-    // Bit 7 indicates press (1) or release (0)
-    // Meshtastic TDeckProKeyboard uses IsPressed = (k & 0x80)
-    bool pressed = (key_code & 0x80) != 0;
-    
-    if (pressed) {
-        triggerVibration();
-    }
-
-    // Key ID is in the lower 7 bits (1-based index)
-    int key = key_code & 0x7F;
-    
-    // Adjust to 0-based index for array mapping
-    // Fix for "shifted" characters (1->0, 2->1, etc.)
-    int key_index = key - 1;
-    
-    int row = key_index / KEY_COLS;
-    int col = key_index % KEY_COLS;
-    
-    // No mirroring needed for standard layout if keymap is correct
-    // col = (KEY_COLS - 1) - col;
-    
-    return processKeyEvent(row, col, pressed);
+    return 0;
 }
+
 
 char KeyboardManager::processKeyEvent(int row, int col, bool pressed) {
     if (row < 0 || row >= KEY_ROWS || col < 0 || col >= KEY_COLS) {
@@ -175,18 +254,18 @@ char KeyboardManager::processKeyEvent(int row, int col, bool pressed) {
     return c;
 }
 
-void KeyboardManager::triggerVibration() {
+void KeyboardManager::triggerHaptic() {
     uint8_t dummy = 1;
     // Non-blocking send, if queue full, drop it
-    xQueueSend(vibeQueue, &dummy, 0); 
+    xQueueSend(hapticQueue, &dummy, 0); 
 }
 
-void KeyboardManager::vibrationTask(void* parameter) {
+void KeyboardManager::hapticTask(void* parameter) {
     KeyboardManager* km = (KeyboardManager*)parameter;
     uint8_t msg;
     
     for(;;) {
-        if (xQueueReceive(km->vibeQueue, &msg, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(km->hapticQueue, &msg, portMAX_DELAY) == pdTRUE) {
             ledcWrite(0, 128); // 50% power
             vTaskDelay(pdMS_TO_TICKS(5)); // 5ms duration
             ledcWrite(0, 0);
@@ -208,4 +287,14 @@ void KeyboardManager::setBacklight(bool on) {
 void KeyboardManager::toggleBacklight() {
     int state = digitalRead(BOARD_KEYBOARD_LED);
     setBacklight(state == LOW);
+}
+
+void KeyboardManager::clearBuffer(unsigned long durationMs) {
+    // Clear Input Queue
+    xQueueReset(inputQueue); 
+    
+    // Original logic cleared hardware buffer by reading it.
+    // The task does that now. We just wait a bit to drain pending events.
+    if (durationMs > 0) delay(durationMs);
+    xQueueReset(inputQueue); 
 }

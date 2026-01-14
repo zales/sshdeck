@@ -4,8 +4,8 @@
 #include <functional>
 #include <algorithm> // For std::sort
 
-WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp)
-    : terminal(term), keyboard(kb), display(disp), security(nullptr) {
+WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp, PowerManager& pwr)
+    : terminal(term), keyboard(kb), display(disp), power(pwr), security(nullptr) {
 }
 
 void WifiManager::setSecurityManager(SecurityManager* sec) {
@@ -111,7 +111,9 @@ void WifiManager::refreshScreen() {
 
 // Helper to enter text using the MenuSystem's UI style
 String WifiManager::readInput(const String& prompt, bool passwordMask) {
-    MenuSystem menu(display, keyboard);
+    UIManager ui(display);
+    ui.updateStatusState(power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
+    MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
     String result = "";
     if (menu.textInput(prompt, result, passwordMask)) {
@@ -122,7 +124,8 @@ String WifiManager::readInput(const String& prompt, bool passwordMask) {
 
 bool WifiManager::connect() {
     loadCredentials();
-    MenuSystem menu(display, keyboard);
+    UIManager ui(display);
+    MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
 
     // Auto-connect attempt
@@ -147,16 +150,12 @@ bool WifiManager::connect() {
                     display.getDisplay().firstPage();
                     do {
                         display.getDisplay().fillScreen(GxEPD_WHITE);
+                        
+                        // Draw Consistent Status Bar
+                        ui.drawStatusBar("Wifi Setup", false, power.getPercentage(), power.isCharging());
+
                         int w = display.getWidth();
                         auto& u8g2 = display.getFonts();
-                        
-                        // Title Bar
-                        display.getDisplay().fillRect(0, 0, w, 24, GxEPD_BLACK);
-                        u8g2.setForegroundColor(GxEPD_WHITE);
-                        u8g2.setBackgroundColor(GxEPD_BLACK);
-                        u8g2.setFont(u8g2_font_helvB12_tr);
-                        u8g2.setCursor(5, 18);
-                        u8g2.print("Wifi Setup");
                         
                         // Content
                         u8g2.setForegroundColor(GxEPD_BLACK);
@@ -271,18 +270,20 @@ bool WifiManager::connect() {
 }
 
 bool WifiManager::tryConnect(const String& ssid, const String& pass) {
+    UIManager ui(display);
     display.getDisplay().firstPage();
     do {
          display.getDisplay().fillScreen(GxEPD_WHITE);
          
+         ui.drawStatusBar("Connecting...", false, power.getPercentage(), power.isCharging());
+
          auto& u8g2 = display.getFonts();
          u8g2.setFont(u8g2_font_6x10_tr);
          u8g2.setForegroundColor(GxEPD_BLACK);
          u8g2.setBackgroundColor(GxEPD_WHITE);
          
-         u8g2.setCursor(10, 30);
-         u8g2.print("Connecting...");
-         u8g2.setCursor(10, 45);
+         u8g2.setCursor(10, 45); // Moved down slightly
+         u8g2.print("Target: ");
          u8g2.print(ssid.c_str());
     } while (display.getDisplay().nextPage());
     
@@ -320,9 +321,12 @@ bool WifiManager::tryConnect(const String& ssid, const String& pass) {
 }
 
 void WifiManager::scanAndSelect() {
+    UIManager ui(display); // Create early for status bar
     display.getDisplay().firstPage();
     do {
          display.getDisplay().fillScreen(GxEPD_WHITE);
+         
+         ui.drawStatusBar("Network Scan", false, power.getPercentage(), power.isCharging());
          
          auto& u8g2 = display.getFonts();
          u8g2.setFont(u8g2_font_helvB12_tr);
@@ -340,7 +344,7 @@ void WifiManager::scanAndSelect() {
     int n = WiFi.scanNetworks();
     
     if (n == 0) {
-        MenuSystem menu(display, keyboard);
+        MenuSystem menu(ui, keyboard);
         menu.drawMessage("Scan Results", "No Networks Found");
         return; 
     }
@@ -377,7 +381,7 @@ void WifiManager::scanAndSelect() {
         return a.rssi > b.rssi;
     });
     
-    MenuSystem menu(display, keyboard);
+    MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
     while (true) {
         std::vector<String> labels;
@@ -467,7 +471,8 @@ void WifiManager::deleteCredential(int index) {
 
 void WifiManager::manage() {
     loadCredentials();
-    MenuSystem menu(display, keyboard);
+    UIManager ui(display);
+    MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
     
     while(true) {

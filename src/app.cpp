@@ -1,5 +1,6 @@
 #include "app.h"
 #include <WiFi.h>
+#include <Wire.h>
 #include <driver/rtc_io.h>
 #include "board_def.h"
 
@@ -7,7 +8,7 @@
 #define PIN_BOOT_BUTTON 0
 
 App::App() 
-    : wifi(terminal, keyboard, display), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), pwrBtnStart(0) {
+    : wifi(terminal, keyboard, display, power), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), pwrBtnStart(0), lastAniUpdate(0), lastScreenRefresh(0) {
 }
 
 void App::setup() {
@@ -25,9 +26,12 @@ void App::setup() {
 
     serverManager.setSecurityManager(&security);
     serverManager.begin();
-    menu = new MenuSystem(display, keyboard);
+    menu = new MenuSystem(ui, keyboard);
     // Bind member function via lambda
-    menu->setIdleCallback([this]() { this->checkPowerButton(); });
+    menu->setIdleCallback([this]() { 
+        this->checkPowerButton(); 
+        ui.updateStatusState(power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
+    });
     
     Serial.println("Setup complete, entering menu...");
 }
@@ -65,6 +69,11 @@ void App::initializeHardware() {
     
     delay(1500); // Stabilization
     
+    // Initialize I2C and Fuel Gauge
+    Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL, 100000); // Force 100kHz
+    
+    power.begin(Wire);
+
     if (!display.begin()) {
         Serial.println("Display init failed!");
         delay(5000);
@@ -97,8 +106,17 @@ void App::loop() {
         // STATE_TERMINAL
         if (sshClient && sshClient->isConnected()) {
             sshClient->process();
-            if (terminal.needsUpdate()) {
+            
+            bool forceRedraw = false;
+            // Battery Charging Animation (every 1 sec)
+            if (power.isCharging() && (millis() - lastAniUpdate > 1000)) {
+                lastAniUpdate = millis();
+                forceRedraw = true;
+            }
+
+            if ((terminal.needsUpdate() || forceRedraw) && (millis() - lastScreenRefresh > DISPLAY_UPDATE_INTERVAL_MS)) {
                 drawTerminalScreen();
+                lastScreenRefresh = millis();
             }
             if (!sshClient->isConnected()) {
                 currentState = STATE_MENU;
@@ -236,115 +254,30 @@ void App::enterDeepSleep() {
     esp_deep_sleep_start();
 }
 
-// Li-Po discharge curve adapted from Meshtastic firmware
-// Uses a slightly more generous curve for mid-range voltage
-static const uint32_t BATTERY_CURVE[][2] = {
-    {4190, 100}, {4050, 90}, {3990, 80}, {3890, 70}, {3800, 60},
-    {3720, 50}, {3630, 40}, {3530, 30}, {3420, 20}, {3300, 10},
-    {3100, 0}
-};
-
-float App::getBatteryVoltage() {
-    // Average multiple samples to reduce noise
-    uint32_t mv = 0;
-    const int SAMPLES = 20;
-    for(int i=0; i<SAMPLES; i++) {
-        // analogReadMilliVolts uses the factory calibration data for better accuracy
-        if (BOARD_BAT_ADC >= 0) {
-            mv += analogReadMilliVolts(BOARD_BAT_ADC);
-        } else {
-            mv += 2000; // Dummy value for T-Deck Pro until I2C PMU driver added
-        }
-        if (i < SAMPLES - 1) delay(1);
-    }
-    mv /= SAMPLES;
-
-    // Multiplier of 2.11 (vs theoretical 2.0) accounts for voltage drops/tolerances
-    // as seen in Meshtastic/T-Deck firmware
-    return (mv * 2.11) / 1000.0;
-}
-
-int App::getBatteryPercentage() {
-    float v = getBatteryVoltage();
-    int mv = (int)(v * 1000);
-    
-    if (mv >= 4190) return 100;
-    if (mv <= 3100) return 0;
-    
-    // Interpolate from table
-    for (int i = 0; i < 10; i++) {
-        if (mv >= BATTERY_CURVE[i+1][0]) {
-            return map(mv, BATTERY_CURVE[i+1][0], BATTERY_CURVE[i][0], 
-                       BATTERY_CURVE[i+1][1], BATTERY_CURVE[i][1]);
-        }
-    }
-    
-    return 0;
-}
-
-bool App::isCharging() {
-    return false;
-}
 
 void App::drawTerminalScreen() {
-    display.setRefreshMode(true);
-    display.firstPage();
-    do {
-        display.clear();
-        U8G2_FOR_ADAFRUIT_GFX& u8g2 = display.getFonts();
-        u8g2.setFont(u8g2_font_6x10_tf);
-        u8g2.setFontMode(1);
-        
-        int w = display.getWidth();
-        
-        // Status Bar
-        display.getDisplay().fillRect(0, 0, w, 14, GxEPD_WHITE);
-        u8g2.setForegroundColor(GxEPD_BLACK);
-        u8g2.setBackgroundColor(GxEPD_WHITE);
-        
-        // WiFi
-        u8g2.setCursor(2, 10);
-        u8g2.print("W: ");
+    ui.setRefreshMode(true);
+    ui.render([this](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        // Construct Title for status bar
+        String title = "";
         if (WiFi.status() == WL_CONNECTED) {
-            String ssid = WiFi.SSID();
-            if (ssid.length() > 8) ssid = ssid.substring(0, 8);
-            u8g2.print(ssid);
+            title = WiFi.SSID();
+            if (title.length() > 8) title = title.substring(0, 8);
         } else {
-            u8g2.print("No Net");
+            title = "Offline";
         }
         
-        // Host
         if (sshClient && sshClient->isConnected()) {
-            u8g2.setCursor(90, 10);
-            u8g2.print("S: ");
+            title += " > ";
             String host = sshClient->getConnectedHost();
             if (host.length() > 10) host = host.substring(0, 10);
-            u8g2.print(host);
-        } else if (WiFi.status() == WL_CONNECTED) {
-            u8g2.setCursor(90, 10);
-            u8g2.print("Connecting...");
+            title += host;
         }
 
-        // Battery
-        int bat = getBatteryPercentage();
-        int bx = w - 24;
-        int by = 3;
-        display.getDisplay().drawRect(bx, by, 18, 9, GxEPD_BLACK);
-        display.getDisplay().fillRect(bx + 18, by + 2, 2, 5, GxEPD_BLACK);
-        
-        int bw = (bat * 16) / 100;
-        if (bw > 16) bw = 16;
-        if (bw < 0) bw = 0;
-        if (bw > 0) display.getDisplay().fillRect(bx + 1, by + 1, bw, 7, GxEPD_BLACK);
-        
-        u8g2.setCursor(bx - 28, 10);
-        if (isCharging()) {
-            u8g2.print("CHG");
-        } else {
-            u8g2.print(String(bat) + "%");
-        }
-        
-        display.getDisplay().drawFastHLine(0, 13, w, GxEPD_BLACK);
+        ui.drawStatusBar(title, WiFi.status() == WL_CONNECTED, power.getPercentage(), power.isCharging());
+
+        u8g2.setFont(u8g2_font_6x10_tf);
+        u8g2.setFontMode(1);
         
         // Terminal Content
         int y_start = 24;
@@ -362,7 +295,7 @@ void App::drawTerminalScreen() {
                     int y = y_start + (row * line_h);
                     
                     if (inv) {
-                        display.fillRect(x, y - 8, char_w, line_h, GxEPD_BLACK);
+                        ui.fillRect(x, y - 8, char_w, line_h, GxEPD_BLACK);
                         u8g2.setFontMode(1); 
                         u8g2.setForegroundColor(GxEPD_WHITE);
                         u8g2.setBackgroundColor(GxEPD_BLACK);
@@ -386,7 +319,7 @@ void App::drawTerminalScreen() {
                 const char* line = terminal.getLine(cy);
                 if (cx < (int)strlen(line)) cursorChar = line[cx];
                 
-                display.fillRect(c_x_px, c_y_px - 8, char_w, line_h, GxEPD_BLACK);
+                ui.fillRect(c_x_px, c_y_px - 8, char_w, line_h, GxEPD_BLACK);
                 u8g2.setFontMode(1);
                 u8g2.setForegroundColor(GxEPD_WHITE);
                 u8g2.setBackgroundColor(GxEPD_BLACK);
@@ -394,7 +327,7 @@ void App::drawTerminalScreen() {
                 u8g2.print(cursorChar);
             }
         }    
-    } while (display.nextPage());
+    });
     terminal.clearUpdateFlag();
 }
 
@@ -570,6 +503,7 @@ void App::handleSettings() {
             "Storage & Keys",
             "System Update",
             "System Info",
+            "Battery Info",
             "Back"
         };
         int choice = menu->showMenu("Settings", items);
@@ -589,13 +523,20 @@ void App::handleSettings() {
         }
         else if (choice == 4) {
             String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Disconnected";
-            String bat = String(getBatteryPercentage()) + "% (" + String(getBatteryVoltage()) + "V)";
+            String bat = String(power.getPercentage()) + "% (" + String(power.getVoltage()) + "V)";
             String ram = String(ESP.getFreeHeap() / 1024) + " KB";
             
             ui.drawSystemInfo(ip, bat, ram, WiFi.macAddress());
             
-            while(!keyboard.isKeyPressed()) delay(10);
-            keyboard.getKeyChar();
+            keyboard.clearBuffer();
+            while(!keyboard.isKeyPressed()) {
+                if (wifi.getIdleCallback()) wifi.getIdleCallback()(); // Keep power mgmt alive
+                delay(50);
+            }
+            keyboard.getKeyChar(); // consume the key
+        }
+        else if (choice == 5) {
+            handleBatteryInfo();
         }
         else {
             return;
@@ -768,3 +709,52 @@ void App::exitStorageMode() {
     delay(1000);
     ESP.restart();
 }
+
+void App::handleBatteryInfo() {
+    // 0. Use new helper to clear buffer
+    keyboard.clearBuffer(500);
+
+    while (true) {
+        BatteryStatus status = power.getStatus();
+
+        // --- Render using new UILayout System ---
+        ui.render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+             UILayout layout(ui, "BATTERY STATUS");
+             
+             char buf[64];
+             
+             sprintf(buf, "Src: %s", status.powerSource.c_str());
+             layout.addText(buf);
+             
+             sprintf(buf, "Bat: %d%% (%.2fV)", status.percentage, status.voltage);
+             layout.addText(buf);
+             
+             if (status.voltage > 0) {                 
+                 sprintf(buf, "Cur: %d mA", status.currentMa);
+                 layout.addText(buf);
+
+                 sprintf(buf, "Cap: %d / %d", status.remainingCap, status.fullCap);
+                 layout.addText(buf);
+                 
+                 sprintf(buf, "Hlth: %d%% Cyc: %d", status.soh, status.cycles);
+                 layout.addText(buf);
+
+                 sprintf(buf, "Tmp: %.1f C", status.temperature);
+                 layout.addText(buf);
+             } 
+             
+             layout.addFooter("[ Press Key to Exit ]");
+        });
+        
+        // 500ms Refresh Rate
+        unsigned long start = millis();
+        while (millis() - start < 500) {
+            if (keyboard.isKeyPressed()) {
+                keyboard.getKeyChar(); // consume
+                return;
+            }
+            delay(10);
+        }
+    }
+}
+

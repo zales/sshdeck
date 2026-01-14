@@ -1,12 +1,12 @@
 #pragma once
-#include "display_manager.h"
+#include "ui_manager.h"
 #include "keyboard_manager.h"
 #include <vector>
 #include <functional>
 
 class MenuSystem {
 public:
-    MenuSystem(DisplayManager& display, KeyboardManager& keyboard);
+    MenuSystem(UIManager& ui, KeyboardManager& keyboard);
     
     void setIdleCallback(std::function<void()> callback);
 
@@ -19,10 +19,10 @@ public:
     void drawMessage(const String& title, const String& msg);
 
 private:
-    DisplayManager& display;
+    UIManager& ui;
     KeyboardManager& keyboard;
     std::function<void()> idleCallback;
     
-    void renderMenu(const String& title, const std::vector<String>& items, int selectedIndex);
-    void renderInput(const String& title, const String& currentText);
+    void renderMenu(const String& title, const std::vector<String>& items, int selectedIndex, U8G2_FOR_ADAFRUIT_GFX& u8g2);
+    void renderInput(const String& title, const String& currentText, U8G2_FOR_ADAFRUIT_GFX& u8g2);
 };

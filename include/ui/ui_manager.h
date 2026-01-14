@@ -20,9 +20,7 @@ public:
     void updateBootStatus(const String& status);
     
     // Elements
-    void drawStatusBar(bool wifiConnected, const String& wifiSSID, 
-                       bool sshConnected, const String& sshHost, 
-                       int batteryPercent, float batteryVolts);
+    void drawStatusBar(const String& title, bool wifiConnected, int batteryPercent, bool isCharging);
     
     // Generic
     void clearScreen(uint16_t color = GxEPD_WHITE);
@@ -32,6 +30,46 @@ public:
     // For external custom drawing if needed
     U8G2_FOR_ADAFRUIT_GFX& getFonts();
 
+    // Advanced Generic Renders
+    void render(std::function<void(U8G2_FOR_ADAFRUIT_GFX&)> drawCallback);
+    void setRefreshMode(bool partial);
+    
+    // Primitives
+    void drawHeader(const String& title);
+    void drawFooter(const String& message);
+    void drawTextLine(int x, int y, const String& text, const uint8_t* font = nullptr, bool invert = false);
+    void drawLabelValue(int y, const String& label, const String& value);
+    
+    // Helpers
+    void fillRect(int x, int y, int w, int h, uint16_t color);
+    void drawRect(int x, int y, int w, int h, uint16_t color);
+    void drawFastHLine(int x, int y, int w, uint16_t color);
+
+    void updateStatusState(int bat, bool charging, bool wifi);
+
 private:
     DisplayManager& display;
+    
+    int currentBat = 0;
+    bool currentCharging = false;
+    bool currentWifi = false;
 };
+
+// UI Layout Helper for automatic positioning
+class UILayout {
+public:
+    UILayout(UIManager& mgr, const String& title);
+    
+    void addText(const String& text);
+    void addItem(const String& label, const String& value);
+    void addFooter(const String& text);
+    
+    // Manual spacing control if needed
+    void space(int pixels);
+    int getY() const { return currentY; }
+
+private:
+    UIManager& ui;
+    int currentY;
+};
+    void setRefreshMode(bool partial);

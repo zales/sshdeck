@@ -30,21 +30,34 @@ public:
     void toggleBacklight();
     void setBacklight(bool on);
 
-    void loop() {} // No-op for now, task handles vibration
+    void loop() {} // No-op, task handles inputs
+
+    // Queue item structure
+    struct KeyEvent {
+        char key;
+        uint8_t modifiers; // 0=None, 1=Shift, 2=Ctrl/Mic, 4=Alt, 8=Sym
+    };
 
 private:
     Adafruit_TCA8418 keypad;
-    QueueHandle_t vibeQueue;
+    QueueHandle_t hapticQueue;
+    QueueHandle_t inputQueue;
+    TaskHandle_t inputTaskHandle;
     
-    static void vibrationTask(void* parameter);
-    void triggerVibration();
+    static void hapticTask(void* parameter);
+    static void inputTask(void* parameter);
+    static void IRAM_ATTR isr();
+    void triggerHaptic();
 
-    bool sym_active;
-    bool shift_active;
-    bool ctrl_active;
-    bool alt_active;
-    unsigned long mic_press_time = 0;
+    volatile bool sym_active;
+    volatile bool shift_active;
+    volatile bool ctrl_active;
+    volatile bool alt_active;
+    volatile unsigned long mic_press_time = 0;
     
     bool initializeKeypad();
     char processKeyEvent(int row, int col, bool pressed);
+    
+public:
+    void clearBuffer(unsigned long durationMs = 300);
 };

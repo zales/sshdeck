@@ -7,10 +7,21 @@ DisplayManager::DisplayManager()
 }
 
 bool DisplayManager::begin() {
-    // Initialize SPI for display (Shared with SD Card)
-    SPI.begin(BOARD_EPD_SCK, BOARD_SPI_MISO, BOARD_EPD_MOSI, BOARD_EPD_CS);
+    // Ensure all SPI Chip Selects are inactive (HIGH) before starting SPI
+    // to prevent bus contention issues which might cause weak E-Ink updates
+    pinMode(BOARD_SD_CS, OUTPUT);    digitalWrite(BOARD_SD_CS, HIGH);
+    pinMode(BOARD_LORA_CS, OUTPUT);  digitalWrite(BOARD_LORA_CS, HIGH);
+    pinMode(BOARD_EPD_CS, OUTPUT);   digitalWrite(BOARD_EPD_CS, HIGH);
+
+    // Initialize SPI
+    // Note: Passing -1 for MISO as per official example, since EPD is write-only 
+    // and we want to avoid input noise during display init.
+    SPI.begin(BOARD_EPD_SCK, -1, BOARD_EPD_MOSI, BOARD_EPD_CS);
     
-    display.init(115200, true, 2, false);
+    // "True" for 2nd arg enables Serial debug output from GxEPD2 if needed
+    // "2" ms reset pulse is specific for T-Deck Pro "clever" reset circuit
+    display.init(115200, true, 2, false); 
+    
     display.setRotation(DISPLAY_ROTATION);
     
     u8g2Fonts.begin(display);
