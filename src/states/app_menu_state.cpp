@@ -2,6 +2,11 @@
 #include "app.h"
 
 void AppMenuState::enter(App& app) {
+    // Perform a Full Refresh Clear to remove ghosting from previous states (e.g. Terminal)
+    app.display.lock();
+    app.display.fullClean();
+    app.display.unlock();
+
     if (app.menu) {
         app.handleMainMenu();
     }

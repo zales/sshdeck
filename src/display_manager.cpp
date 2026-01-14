@@ -50,7 +50,18 @@ bool DisplayManager::begin() {
 }
 
 void DisplayManager::clear() {
+    // Just clear the memory buffer, do not trigger refresh or change window mode
     display.fillScreen(GxEPD_WHITE);
+}
+
+void DisplayManager::fullClean() {
+    // Perform a proper Full Refresh Clear to white
+    // This is a blocking operation that flashes the screen
+    display.setFullWindow();
+    display.firstPage();
+    do {
+        display.fillScreen(GxEPD_WHITE);
+    } while (display.nextPage());
 }
 
 void DisplayManager::update() {

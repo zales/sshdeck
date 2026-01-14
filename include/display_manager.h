@@ -15,6 +15,7 @@ public:
     
     bool begin();
     void clear();
+    void fullClean();
     void update();
     void drawText(int x, int y, const char* text);
     void fillRect(int x, int y, int w, int h, uint16_t color);
