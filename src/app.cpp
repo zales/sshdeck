@@ -5,18 +5,11 @@
 #include "board_def.h"
 
 App::App() 
-    : wifi(terminal, keyboard, ui, power), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0) {
+    : wifi(terminal, keyboard, ui, power), ui(display), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0) {
 }
 
 App::~App() {
-    if (sshClient) {
-        delete sshClient;
-        sshClient = nullptr;
-    }
-    if (menu) {
-        delete menu;
-        menu = nullptr;
-    }
+    // Resources automatically released by unique_ptr
 }
 
 void App::setup() {
@@ -34,7 +27,7 @@ void App::setup() {
 
     serverManager.setSecurityManager(&security);
     serverManager.begin();
-    menu = new MenuSystem(ui);
+    menu.reset(new MenuSystem(ui)); // Use reset for compatibility
     
     Serial.println("Setup complete, entering menu...");
 }
@@ -336,13 +329,9 @@ void App::connectToServer(const String& host, int port, const String& user, cons
     terminal.clear();
     terminal.appendString(("Connecting to " + name + "...\n").c_str());
     
-    // Safe cleanup of existing connection
-    if (sshClient) {
-        delete sshClient;
-        sshClient = nullptr;
-    }
+    // unique_ptr automatically deletes the old object when assigned a new one
+    sshClient.reset(new SSHClient(terminal, keyboard));
     
-    sshClient = new SSHClient(terminal, keyboard);
     if (!sshClient) {
         terminal.appendString("ERROR: Failed to allocate SSH client\n");
         return;

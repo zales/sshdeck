@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <vector>
+#include <memory>
 #include "config.h"
 #include "display_manager.h"
 #include "keyboard_manager.h"
@@ -34,14 +35,14 @@ private:
     KeyboardManager keyboard;
     UIManager ui;
     TerminalEmulator terminal;
+    PowerManager power;
     ServerManager serverManager;
     StorageManager storage;
     WifiManager wifi;
-    MenuSystem* menu;
-    SSHClient* sshClient;
+    std::unique_ptr<MenuSystem> menu;
+    std::unique_ptr<SSHClient> sshClient;
     SecurityManager security;
     OtaManager ota;
-    PowerManager power;
 
     // State
     AppState currentState;
