@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "config.h"
 
 /**
@@ -35,6 +37,8 @@ public:
     bool isAppCursorMode() const { return application_cursor_mode; }
     
 private:
+    void _appendCharImpl(char c);
+    
     // Buffers - Fixed char arrays to prevent heap fragmentation
     char lines_primary[TERM_ROWS][TERM_COLS + 1];
     CharAttr attrs_primary[TERM_ROWS][TERM_COLS];
@@ -79,4 +83,6 @@ private:
     void scrollUp();
     void scrollDown();
     void switchBuffer(bool alt);
+    
+    SemaphoreHandle_t _mutex;
 };

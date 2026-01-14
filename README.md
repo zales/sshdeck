@@ -38,7 +38,7 @@ The keyboard logic is designed to maximize utility despite the limited key count
 | Key / Combo | Action | Note |
 | :--- | :--- | :--- |
 | **Power Button** (Hold 1s) | **Sleep / Power Off** | Dedicated hardware callback. Wake by pressing again. |
-| **Trackball** / Mic Keys | **Navigation** | Use `Mic + W/A/S/D` for Arrow Keys if trackball is absent/unreliable. |
+| **Mic Keys Navigation** | **Arrow Keys** | Use `Mic + W/A/S/D` for Arrow Keys navigation. |
 | **Mic** (Microphone Icon) | **Control (Ctrl)** | Functions as the `Ctrl` modifier key. |
 | **Sym** (Speaker Icon) | **Symbols / Numbers** | Activates the Symbol layer (orange/blue keys). |
 | **Shift** (Up Arrow) | **Shift** | Capital letters. |

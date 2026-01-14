@@ -38,11 +38,6 @@ SystemEvent KeyboardManager::getSystemEvent() {
     return SYS_EVENT_NONE;
 }
 
-bool KeyboardManager::isTrackballPressed() {
-    // TODO: Define trackball click pin
-    return false; 
-}
-
 bool KeyboardManager::begin() {
     // Setup Backlight
     pinMode(BOARD_KEYBOARD_LED, OUTPUT);
@@ -61,8 +56,6 @@ bool KeyboardManager::begin() {
     ledcWrite(0, 0);
 
     // I2C is already initialized in App::initializeHardware
-    // Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
-    // Wire.setClock(100000);
     
     // Create Queues
     hapticQueue = xQueueCreate(10, sizeof(uint8_t));
@@ -146,7 +139,6 @@ void KeyboardManager::inputTask(void* parameter) {
             if (i2cMutex == NULL || xSemaphoreTake(i2cMutex, portMAX_DELAY) == pdTRUE) {
                 
                 int loopLimit = 10; // Avoid infinite loop
-                // ERROR FIX: Use keypad.available() (HW) not km->available() (Queue)
                 while (km->keypad.available() > 0 && loopLimit-- > 0) {
                      
                      int key_code = km->keypad.getEvent();
@@ -190,11 +182,7 @@ bool KeyboardManager::isKeyPressed() {
 }
 
 int KeyboardManager::available() {
-    // This is used by internal logic. 
-    // BUT Adafruit_TCA8418::available() reads the register.
-    // If called from main thread, it conflicts with Task I2C usage.
-    // We should ONLY call this from the Task.
-    // Exposed 'available()' should return queue size.
+    // Správně vrací velikost fronty místo přímého I2C volání
     return uxQueueMessagesWaiting(inputQueue);
 }
 

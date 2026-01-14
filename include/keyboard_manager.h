@@ -39,9 +39,6 @@ public:
     void toggleBacklight();
     void setBacklight(bool on);
 
-    // Trackball / Click
-    bool isTrackballPressed();
-
 private:
     Adafruit_TCA8418 keypad;
     QueueHandle_t hapticQueue;

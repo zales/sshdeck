@@ -5,7 +5,7 @@
 
 SSHClient::SSHClient(TerminalEmulator& term, KeyboardManager& kb) 
     : terminal(term), keyboard(kb), session(nullptr), channel(nullptr), 
-      ssh_connected(false), last_update(0) {
+      _state(DISCONNECTED), last_update(0), _pendingCancel(false) {
 }
 
 void SSHClient::setRefreshCallback(std::function<void()> callback) {
@@ -18,168 +18,232 @@ void SSHClient::setHelpCallback(std::function<void()> callback) {
 
 SSHClient::~SSHClient() {
     disconnect();
+    // Wait for the connection task to gracefully exit to avoid Use-After-Free
+    while (_taskHandle != NULL) {
+        // vTaskDelay is FreeRTOS friendly delay
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
 }
 
-bool SSHClient::connectSSH(const char* host, int port, const char* user, const char* password, const char* keyData) {
+void SSHClient::connectSSH(const char* host, int port, const char* user, const char* password, const char* keyData) {
+    if (_state == CONNECTING) return;
+    
+    // Ensure we don't start if a task is somehow still running (should be handled by cancel check)
+    if (_taskHandle != NULL) {
+        terminal.appendString("Busy cleanup...\n");
+        return;
+    }
+
     terminal.appendString("Connecting SSH to ");
     terminal.appendString(host);
     terminal.appendString("...\n");
     if (onRefresh) onRefresh();
     
+    _connHost = host;
+    _connPort = port;
+    _connUser = user;
+    _connPass = password;
+    if (keyData) _connKey = keyData; else _connKey = "";
+
+    _state = CONNECTING;
+    _pendingCancel = false;
+    _lastError = "";
+
+    xTaskCreate(connectTask, "ssh_conn", 16384, this, 1, &_taskHandle);
+}
+
+void SSHClient::connectTask(void* param) {
+    SSHClient* self = (SSHClient*)param;
+    
     // Initialize SSH session
-    session = ssh_new();
+    ssh_session session = ssh_new();
     if (session == nullptr) {
-        terminal.appendString("SSH init failed!\n");
-        return false;
+        self->terminal.appendString("SSH init failed!\n");
+        self->_state = FAILED;
+        self->_lastError = "SSH Init Failed";
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (self->_pendingCancel) {
+        ssh_free(session);
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
     }
     
-    ssh_options_set(session, SSH_OPTIONS_HOST, host);
-    ssh_options_set(session, SSH_OPTIONS_PORT, &port);
-    ssh_options_set(session, SSH_OPTIONS_USER, user);
+    ssh_options_set(session, SSH_OPTIONS_HOST, self->_connHost.c_str());
+    ssh_options_set(session, SSH_OPTIONS_PORT, &self->_connPort);
+    ssh_options_set(session, SSH_OPTIONS_USER, self->_connUser.c_str());
     
     // Disable logging for production performance
     int verbosity = SSH_LOG_NOLOG;
     ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
     
-    // Set 10s connection timeout (default is usually too long)
+    // Set 10s connection timeout
     long timeout = 10; 
     ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout);
     
     // Connect
     if (ssh_connect(session) != SSH_OK) {
-        terminal.appendString("SSH connect failed!\n");
+        self->terminal.appendString("SSH connect failed!\n");
         ssh_free(session);
-        session = nullptr;
-        return false;
+        self->_state = FAILED;
+        self->_lastError = "Connect Failed";
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (self->_pendingCancel) {
+        ssh_disconnect(session);
+        ssh_free(session);
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
     }
     
     // Authenticate
     int rc = SSH_AUTH_DENIED;
+    
+    const char* keyData = self->_connKey.length() > 0 ? self->_connKey.c_str() : nullptr;
     
     // Check provided key first, then macro fallback if needed
     bool hasKey = (keyData != nullptr && strlen(keyData) > 10);
     bool useMacroKey = (!hasKey && SSH_USE_KEY && strlen(SSH_KEY_DATA) > 10);
 
     if (hasKey || useMacroKey) {
-        terminal.appendString("Using Key Auth...\n");
-        if (onRefresh) onRefresh();
+        self->terminal.appendString("Using Key Auth...\n");
         ssh_key privkey;
         
         const char* keyToUse = hasKey ? keyData : SSH_KEY_DATA;
         
-        // Debug: Print key info (safely)
-        String keyLenMsg = "Key Len: " + String(strlen(keyToUse)) + "\n";
-        terminal.appendString(keyLenMsg.c_str());
-
-        // Check header format
-        if (strstr(keyToUse, "OPENSSH PRIVATE KEY")) {
-             terminal.appendString("ERR: OPENSSH FORMAT DETECTED!\n");
-             terminal.appendString("This firmware needs PEM (RSA)\n");
-             terminal.appendString("Convert key on PC:\n");
-             terminal.appendString("ssh-keygen -p -m PEM -f id_rsa\n");
-             rc = SSH_AUTH_DENIED; 
+        int importRc = ssh_pki_import_privkey_base64(keyToUse, nullptr, nullptr, nullptr, &privkey);
+        if (importRc == SSH_OK) {
+            self->terminal.appendString("Key Import OK. Auth...\n");
+            rc = ssh_userauth_publickey(session, nullptr, privkey);
+            ssh_key_free(privkey);
+            
+            if (rc != SSH_AUTH_SUCCESS) {
+                self->terminal.appendString("Pubkey Auth Failed: ");
+                self->terminal.appendString(ssh_get_error(session));
+                self->terminal.appendString("\nCheck server authorized_keys\n");
+            }
         } else {
-            // Check for valid PEM header/footer
-            if (!strstr(keyToUse, "-----BEGIN RSA PRIVATE KEY-----")) {
-                 terminal.appendString("ERR: Missing RSA Start Header\n");
-                 terminal.appendString("First 20 chars:\n");
-                 char snippet[21];
-                 strncpy(snippet, keyToUse, 20); snippet[20] = 0;
-                 terminal.appendString(snippet);
-                 terminal.appendString("\n");
-            }
-
-            int importRc = ssh_pki_import_privkey_base64(keyToUse, nullptr, nullptr, nullptr, &privkey);
-            if (importRc == SSH_OK) {
-                terminal.appendString("Key Import OK. Auth...\n");
-                rc = ssh_userauth_publickey(session, nullptr, privkey);
-                ssh_key_free(privkey);
-                
-                if (rc != SSH_AUTH_SUCCESS) {
-                    terminal.appendString("Pubkey Auth Failed: ");
-                    terminal.appendString(ssh_get_error(session));
-                    terminal.appendString("\nCheck server authorized_keys\n");
-                }
-            } else {
-                terminal.appendString("Key Import Failed!\n");
-                terminal.appendString("Code: ");
-                terminal.appendString(String(importRc).c_str());
-                terminal.appendString("\n");
-            }
+            self->terminal.appendString("Key Import Failed!\n");
         }
     }
 
     // Fallback to password
     if (rc != SSH_AUTH_SUCCESS) {
         if (SSH_USE_KEY) {
-             terminal.appendString("Key auth failed, trying password...\n");
-             if (onRefresh) onRefresh();
+             self->terminal.appendString("Key auth failed, trying password...\n");
         }
-        rc = ssh_userauth_password(session, nullptr, password);
+        rc = ssh_userauth_password(session, nullptr, self->_connPass.c_str());
+    }
+
+    if (self->_pendingCancel) {
+        ssh_disconnect(session);
+        ssh_free(session);
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
     }
     
     if (rc != SSH_AUTH_SUCCESS) {
-        terminal.appendString("SSH auth failed!\n");
+        self->terminal.appendString("SSH auth failed!\n");
         ssh_disconnect(session);
         ssh_free(session);
-        session = nullptr;
-        return false;
+        self->_state = FAILED;
+        self->_lastError = "Auth Failed";
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
     }
     
     // Open channel
-    channel = ssh_channel_new(session);
+    ssh_channel channel = ssh_channel_new(session);
     if (channel == nullptr) {
-        terminal.appendString("SSH channel failed!\n");
+        self->terminal.appendString("SSH channel failed!\n");
         ssh_disconnect(session);
         ssh_free(session);
-        session = nullptr;
-        return false;
+        self->_state = FAILED;
+        self->_lastError = "Channel Failed";
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
     }
     
     if (ssh_channel_open_session(channel) != SSH_OK) {
-        terminal.appendString("Channel open failed!\n");
+        self->terminal.appendString("Channel open failed!\n");
         ssh_channel_free(channel);
         ssh_disconnect(session);
         ssh_free(session);
-        channel = nullptr;
-        session = nullptr;
-        return false;
+        self->_state = FAILED;
+         self->_lastError = "Channel Open Failed";
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
     }
     
     // Request PTY
     if (ssh_channel_request_pty_size(channel, TERM_TYPE, TERM_COLS, TERM_ROWS) != SSH_OK) {
-        terminal.appendString("PTY request failed!\n");
+        self->terminal.appendString("PTY request failed!\n");
         ssh_channel_close(channel);
         ssh_channel_free(channel);
         ssh_disconnect(session);
         ssh_free(session);
-        channel = nullptr;
-        session = nullptr;
-        return false;
+        self->_state = FAILED;
+         self->_lastError = "PTY Failed";
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
     }
     
     // Start shell
     if (ssh_channel_request_shell(channel) != SSH_OK) {
-        terminal.appendString("Shell request failed!\n");
+        self->terminal.appendString("Shell request failed!\n");
         ssh_channel_close(channel);
         ssh_channel_free(channel);
         ssh_disconnect(session);
         ssh_free(session);
-        channel = nullptr;
-        session = nullptr;
-        return false;
+        self->_state = FAILED;
+         self->_lastError = "Shell Failed";
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (self->_pendingCancel) {
+        ssh_channel_close(channel);
+        ssh_channel_free(channel);
+        ssh_disconnect(session);
+        ssh_free(session);
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
     }
     
-    terminal.appendString("SSH Connected!\n\n");
-    ssh_connected = true;
-    connectedHost = String(host);
-    last_update = millis();
-    if (onRefresh) onRefresh();
+    self->terminal.appendString("SSH Connected!\n\n");
+    self->session = session;
+    self->channel = channel;
+    self->connectedHost = self->_connHost;
+    self->last_update = millis();
+    self->_state = CONNECTED;
+    if (self->onRefresh) self->onRefresh();
     
-    return true;
+    self->_taskHandle = NULL;
+    vTaskDelete(NULL);
 }
 
 void SSHClient::disconnect() {
+    _pendingCancel = true;
+    _state = DISCONNECTED;
+
+    // Do not kill task aggressively to prevent leaks
+    // The task will exit when it sees _pendingCancel
+    
     if (channel) {
         ssh_channel_close(channel);
         ssh_channel_free(channel);
@@ -192,18 +256,17 @@ void SSHClient::disconnect() {
         session = nullptr;
     }
     
-    ssh_connected = false;
+    _state = DISCONNECTED;
 }
 
 void SSHClient::process() {
-    if (!ssh_connected) return;
+    if (_state != CONNECTED) return;
     
     // Reset shortcut flag if Mic released
     if (!keyboard.isMicActive()) {
         mic_shortcut_used = false;
     }
 
-    // processKeyboardInput(); handled externally via write()
     processSSHOutput();
 
     // Check for Long Press Mic (Help)
@@ -218,7 +281,7 @@ void SSHClient::process() {
 }
 
 void SSHClient::write(char c) {
-    if (!ssh_connected) return;
+    if (_state != CONNECTED) return;
 
     if (c == 0) return; 
     
@@ -330,7 +393,7 @@ void SSHClient::processSSHOutput() {
     char buffer[1024];
     int total_read = 0;
     
-    if (!ssh_connected || channel == nullptr) return;
+    if (_state != CONNECTED || channel == nullptr) return;
     
     // Read until buffer is empty or we processed a safety limit
     while (total_read < 8192) { // Safety limit 8KB per loop
@@ -344,9 +407,7 @@ void SSHClient::processSSHOutput() {
         
         if (nbytes > 0) {
             buffer[nbytes] = '\0';
-            for (int i = 0; i < nbytes; i++) {
-                terminal.appendChar(buffer[i]);
-            }
+            terminal.appendString(buffer);
             total_read += nbytes;
             last_update = millis();
         } else {

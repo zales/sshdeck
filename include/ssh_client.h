@@ -20,10 +20,15 @@ public:
     void setRefreshCallback(std::function<void()> callback);
     void setHelpCallback(std::function<void()> callback);
 
-    bool connectSSH(const char* host, int port, const char* user, const char* password, const char* keyData = nullptr);
+    enum State { DISCONNECTED, CONNECTING, CONNECTED, FAILED };
+
+    void connectSSH(const char* host, int port, const char* user, const char* password, const char* keyData = nullptr);
     void disconnect();
     
-    bool isConnected() const { return ssh_connected; }
+    bool isConnected() const { return _state == CONNECTED; }
+    State getState() const { return _state; }
+    String getLastError() const { return _lastError; }
+
     const String& getConnectedHost() const { return connectedHost; }
     void process();  // Call in loop to handle SSH I/O
     void write(char c); // Inject key
@@ -36,10 +41,22 @@ private:
     
     ssh_session session;
     ssh_channel channel;
-    bool ssh_connected;
+    
+    State _state = DISCONNECTED;
+    String _lastError;
     String connectedHost;
+
+    // Connection Task Params
+    String _connHost;
+    int _connPort;
+    String _connUser;
+    String _connPass;
+    String _connKey;
+    TaskHandle_t _taskHandle = NULL;
+    static void connectTask(void* param);
     
     unsigned long last_update;
+    volatile bool _pendingCancel = false;
     unsigned long last_mic_press_handled = 0;
     bool mic_shortcut_used = false;
 

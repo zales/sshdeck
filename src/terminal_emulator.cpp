@@ -20,6 +20,7 @@ TerminalEmulator::TerminalEmulator()
             attrs_alt[i][j].inverse = false;
         }
     }
+    _mutex = xSemaphoreCreateMutex();
 }
 
 void TerminalEmulator::switchBuffer(bool alt) {
@@ -37,7 +38,15 @@ void TerminalEmulator::switchBuffer(bool alt) {
 }
 
 void TerminalEmulator::appendChar(char c) {
-    if (!processAnsi(c)) return;
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+    _appendCharImpl(c);
+    xSemaphoreGive(_mutex);
+}
+
+void TerminalEmulator::_appendCharImpl(char c) {
+    if (!processAnsi(c)) {
+        return;
+    }
     
     if (c == '\r') {
         cursor_x = 0;
@@ -118,18 +127,18 @@ void TerminalEmulator::appendChar(char c) {
             if (cursor_y == scrollBottom) {
                 scrollUp();
             } else if (cursor_y < TERM_ROWS - 1) {
-                cursor_y++;
+                 cursor_y++;
             }
         }
     }
 }
 
-
-
 void TerminalEmulator::appendString(const char* str) {
+    xSemaphoreTake(_mutex, portMAX_DELAY);
     while (*str) {
-        appendChar(*str++);
+        _appendCharImpl(*str++);
     }
+    xSemaphoreGive(_mutex);
 }
 
 void TerminalEmulator::appendString(const String& str) {

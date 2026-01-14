@@ -10,7 +10,7 @@ This document provides a comprehensive technical overview, user manual, and deve
 *   **RAM**: 8MB (Octal PSRAM) + 512KB SRAM
 *   **Display**: 2.33" E-Paper (GDEQ031T10 / GxEPD2 driven) or ST7789 TFT (Standard T-Deck)
 *   **Radio**: SX1262 LoRa Module (868/915 MHz)
-*   **Input**: BlackBerry-style QWERTY Keyboard (TCA8418 I2C Controller) + Trackball
+*   **Input**: BlackBerry-style QWERTY Keyboard (TCA8418 I2C Controller)
 *   **Power**: AXP2101 / I2C PMU (BQ25896 + BQ27220)
 
 ### 1.2 Pinout Configuration (T-Deck Pro)
@@ -76,9 +76,7 @@ The T-Deck keyboard has fewer keys than a standard PC keyboard. Layers are used 
     *   `Mic` + `D` = `Ctrl+D` (EOF).
 
 ### 3.2 Navigation
-*   **Trackball**: Move cursor (if supported by app) or Scroll terminal history.
-*   **Click**: Select / Enter.
-*   **Mic + WASD**: Fallback arrow keys if trackball is unavailable.
+*   **Mic + WASD**: Arrow keys for navigation and terminal scrolling.
 
 ## 4. Operational Modes
 

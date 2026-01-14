@@ -87,9 +87,6 @@ void App::initializeHardware() {
     // Welcome Screen
     _ui.drawBootScreen("SshDeck", "Initializing...");
     
-    // terminal.appendString("Init System...\n");
-    // drawTerminalScreen();
-    
     if (!_keyboard.begin()) {
         _ui.updateBootStatus("Keyboard FAIL!");
         Serial.println("Keyboard init failed!");
@@ -283,13 +280,8 @@ void App::connectToServer(const String& host, int port, const String& user, cons
     String privKey = _security.getSSHKey();
     const char* keyData = (privKey.length() > 0) ? privKey.c_str() : nullptr;
 
-    if (_sshClient->connectSSH(host.c_str(), port, user.c_str(), pass.c_str(), keyData)) {
-        changeState(new AppTerminalState());
-    } else {
-         // Connection failed
-         // Just show message, on dismiss go to main menu
-         _menu->showMessage("Error", "SSH Failed", [this](){ handleMainMenu(); });
-    }
+    _sshClient->connectSSH(host.c_str(), port, user.c_str(), pass.c_str(), keyData);
+    changeState(new AppTerminalState());
 }
 
 
