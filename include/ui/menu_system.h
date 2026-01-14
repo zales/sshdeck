@@ -22,7 +22,4 @@ private:
     UIManager& ui;
     KeyboardManager& keyboard;
     std::function<void()> idleCallback;
-    
-    void renderMenu(const String& title, const std::vector<String>& items, int selectedIndex, U8G2_FOR_ADAFRUIT_GFX& u8g2);
-    void renderInput(const String& title, const String& currentText, U8G2_FOR_ADAFRUIT_GFX& u8g2);
 };

@@ -256,121 +256,28 @@ void App::enterDeepSleep() {
 
 
 void App::drawTerminalScreen() {
-    ui.setRefreshMode(true);
-    ui.render([this](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
-        // Construct Title for status bar
-        String title = "";
-        if (WiFi.status() == WL_CONNECTED) {
-            title = WiFi.SSID();
-            if (title.length() > 8) title = title.substring(0, 8);
-        } else {
-            title = "Offline";
-        }
-        
-        if (sshClient && sshClient->isConnected()) {
-            title += " > ";
-            String host = sshClient->getConnectedHost();
-            if (host.length() > 10) host = host.substring(0, 10);
-            title += host;
-        }
+    // Construct Title for status bar
+    String title = "";
+    if (WiFi.status() == WL_CONNECTED) {
+        title = WiFi.SSID();
+        if (title.length() > 8) title = title.substring(0, 8);
+    } else {
+        title = "Offline";
+    }
+    
+    if (sshClient && sshClient->isConnected()) {
+        title += " > ";
+        String host = sshClient->getConnectedHost();
+        if (host.length() > 10) host = host.substring(0, 10);
+        title += host;
+    }
 
-        ui.drawStatusBar(title, WiFi.status() == WL_CONNECTED, power.getPercentage(), power.isCharging());
-
-        u8g2.setFont(u8g2_font_6x10_tf);
-        u8g2.setFontMode(1);
-        
-        // Terminal Content
-        int y_start = 24;
-        int line_h = 10;
-        int char_w = 6;
-        
-        for (int row = 0; row < TERM_ROWS; row++) {
-            const char* line = terminal.getLine(row);
-            if (line[0] != '\0') {
-                for (int col = 0; line[col] != '\0' && col < TERM_COLS; col++) {
-                    char ch = line[col];
-                    bool inv = terminal.getAttr(row, col).inverse;
-                    
-                    int x = col * char_w;
-                    int y = y_start + (row * line_h);
-                    
-                    if (inv) {
-                        ui.fillRect(x, y - 8, char_w, line_h, GxEPD_BLACK);
-                        u8g2.setFontMode(1); 
-                        u8g2.setForegroundColor(GxEPD_WHITE);
-                        u8g2.setBackgroundColor(GxEPD_BLACK);
-                    } else {
-                        u8g2.setFontMode(1); 
-                        u8g2.setForegroundColor(GxEPD_BLACK);
-                        u8g2.setBackgroundColor(GxEPD_WHITE);
-                    }
-                    u8g2.setCursor(x, y);
-                    u8g2.print(ch);
-                }
-            }
-        }
-        if (terminal.isCursorVisible()) {
-            int cx = terminal.getCursorX();
-            int cy = terminal.getCursorY();
-            if (cx >= 0 && cx < TERM_COLS && cy >= 0 && cy < TERM_ROWS) {
-                int c_x_px = cx * char_w;
-                int c_y_px = y_start + (cy * line_h);
-                char cursorChar = ' ';
-                const char* line = terminal.getLine(cy);
-                if (cx < (int)strlen(line)) cursorChar = line[cx];
-                
-                ui.fillRect(c_x_px, c_y_px - 8, char_w, line_h, GxEPD_BLACK);
-                u8g2.setFontMode(1);
-                u8g2.setForegroundColor(GxEPD_WHITE);
-                u8g2.setBackgroundColor(GxEPD_BLACK);
-                u8g2.setCursor(c_x_px, c_y_px);
-                u8g2.print(cursorChar);
-            }
-        }    
-    });
+    ui.drawTerminal(terminal, title, power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
     terminal.clearUpdateFlag();
 }
 
 void App::showHelpScreen() {
-    display.getDisplay().firstPage();
-    do {
-         display.getDisplay().fillScreen(GxEPD_WHITE);
-         auto& u8g2 = display.getFonts();
-         
-         display.getDisplay().fillRect(0, 0, display.getWidth(), 24, GxEPD_BLACK);
-         u8g2.setForegroundColor(GxEPD_WHITE);
-         u8g2.setBackgroundColor(GxEPD_BLACK);
-         u8g2.setFont(u8g2_font_helvB12_tr);
-         u8g2.setCursor(5, 18);
-         u8g2.print("Help: Shortcuts");
-         
-         u8g2.setForegroundColor(GxEPD_BLACK);
-         u8g2.setBackgroundColor(GxEPD_WHITE);
-         u8g2.setFont(u8g2_font_helvR10_tr);
-         
-         int y = 40; int dy = 16;
-         u8g2.setCursor(5, y); u8g2.print("Mic + W/A/S/D : Arrows"); y+=dy;
-         u8g2.setCursor(5, y); u8g2.print("Mic + Q       : ESC"); y+=dy;
-         u8g2.setCursor(5, y); u8g2.print("Mic + E       : TAB"); y+=dy;
-         u8g2.setCursor(5, y); u8g2.print("Alt + 1-9     : F1-F9"); y+=dy;
-         u8g2.setCursor(5, y); u8g2.print("Alt + B       : Backlight"); y+=dy;
-         u8g2.setCursor(5, y); u8g2.print("Hold Side Btn : Sleep"); y+=dy;
-         u8g2.setCursor(5, y); u8g2.print("Mic Key       : Ctrl"); y+=dy;
-         y+=4;
-         u8g2.setCursor(5, y); u8g2.print("Menu Nav:"); y+=dy;
-         u8g2.setCursor(5, y); u8g2.print("Mic + W       : Up"); y+=dy;
-         u8g2.setCursor(5, y); u8g2.print("Mic + S       : Down"); y+=dy;
-         
-         // Footer
-         int h = display.getHeight();
-         display.fillRect(0, h - 16, display.getWidth(), 16, GxEPD_BLACK);
-         u8g2.setForegroundColor(GxEPD_WHITE);
-         u8g2.setBackgroundColor(GxEPD_BLACK);
-         u8g2.setFont(u8g2_font_profont12_tr); 
-         u8g2.setCursor(5, h - 4);
-         u8g2.print("Press Key to Close");
-
-    } while (display.getDisplay().nextPage());
+    ui.drawHelpScreen();
     
     while(true) {
         if(keyboard.isKeyPressed()) {

@@ -1,4 +1,6 @@
 #include "ui/ui_manager.h"
+#include "terminal_emulator.h"
+#include "config.h"
 
 UIManager::UIManager(DisplayManager& disp) : display(disp) {}
 
@@ -245,6 +247,221 @@ void UIManager::drawConnectingScreen(const String& ssid, const String& password,
          u8g2.setFont(u8g2_font_helvR10_tr);
          u8g2.setCursor(10, 120);
          u8g2.print("Password: " + String(password.length() > 0 ? "***" : "Open"));
+    });
+}
+
+void UIManager::drawMenu(const String& title, const std::vector<String>& items, int selectedIndex) {
+    setRefreshMode(true); // Partial usually for menu nav
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        int w = display.getWidth();
+        int h = display.getHeight();
+        
+        drawHeader(title);
+        
+        u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
+        u8g2.setFont(u8g2_font_helvR12_tr);
+        
+        int startY = 32; 
+        int lineH = 22;
+        int maxItems = (h - startY - 20) / lineH; 
+        
+        int offset = 0;
+        if (items.size() > maxItems) {
+            if (selectedIndex >= maxItems) {
+                offset = selectedIndex - maxItems + 1;
+            }
+        }
+        
+        for (int i = 0; i < maxItems; i++) {
+            int idx = i + offset;
+            if (idx >= items.size()) break;
+            
+            int y = startY + (i) * lineH;
+            
+            // Highlight selection
+            if (idx == selectedIndex) {
+                 display.fillRect(0, y, w, lineH, GxEPD_BLACK);
+                 u8g2.setForegroundColor(GxEPD_WHITE);
+                 u8g2.setBackgroundColor(GxEPD_BLACK);
+                 
+                 // Little adjust for text vertical align in filled box
+                 u8g2.setCursor(5, y + 16); 
+            } else {
+                 u8g2.setForegroundColor(GxEPD_BLACK);
+                 u8g2.setBackgroundColor(GxEPD_WHITE);
+                 u8g2.setCursor(5, y + 16);
+            }
+            
+            u8g2.print(items[idx]);
+        }
+        
+        // Scroll Indicators
+        u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
+        u8g2.setFont(u8g2_font_profont12_tf);
+        if (offset > 0) {
+             u8g2.setCursor(w - 10, startY);
+             u8g2.print("^");
+        }
+        if (offset + maxItems < items.size()) {
+             u8g2.setCursor(w - 10, h - 5);
+             u8g2.print("v");
+        }
+    });
+}
+
+void UIManager::drawInputScreen(const String& title, const String& currentText, bool isPassword) {
+    setRefreshMode(true);
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        int w = display.getWidth();
+        int h = display.getHeight();
+        
+        // Title
+        display.fillRect(0, 0, w, 24, GxEPD_BLACK);
+        u8g2.setForegroundColor(GxEPD_WHITE);
+        u8g2.setBackgroundColor(GxEPD_BLACK);
+        u8g2.setFont(u8g2_font_helvB12_tr);
+        u8g2.setCursor(5, 18);
+        u8g2.print(title);
+        
+        // Input Box
+        u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
+        int boxW = w - 20;
+        display.fillRect(10, 50, boxW, 30, GxEPD_WHITE);
+        // Draw border
+        display.fillRect(10, 50, boxW, 2, GxEPD_BLACK);
+        display.fillRect(10, 80, boxW, 2, GxEPD_BLACK);
+        display.fillRect(10, 50, 2, 32, GxEPD_BLACK);
+        display.fillRect(10 + boxW - 2, 50, 2, 32, GxEPD_BLACK);
+    
+        u8g2.setFont(u8g2_font_helvR12_tr);
+        u8g2.setCursor(15, 72);
+        
+        String displayStr = currentText;
+        if (isPassword) {
+             displayStr = "";
+             for(int i=0; i<currentText.length(); i++) displayStr += "*";
+        }
+        
+        u8g2.print(displayStr);
+        u8g2.print("_"); 
+    
+        // Footer
+        int footerH = 16;
+        display.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
+        u8g2.setForegroundColor(GxEPD_WHITE);
+        u8g2.setBackgroundColor(GxEPD_BLACK);
+        u8g2.setFont(u8g2_font_profont12_tf); 
+        u8g2.setCursor(5, h - 4);
+        u8g2.print("Type: Keys | Enter: OK | Esc: Cancel");
+    });
+}
+
+void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected) {
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        drawStatusBar(statusTitle, wifiConnected, batteryPercent, isCharging);
+
+        u8g2.setFont(u8g2_font_6x10_tf);
+        u8g2.setFontMode(1);
+        
+        // Terminal Content
+        int y_start = 24;
+        int line_h = 10;
+        int char_w = 6;
+        
+        for (int row = 0; row < TERM_ROWS; row++) {
+            const char* line = term.getLine(row);
+            if (line[0] != '\0') {
+                for (int col = 0; line[col] != '\0' && col < TERM_COLS; col++) {
+                    char ch = line[col];
+                    bool inv = term.getAttr(row, col).inverse;
+                    
+                    int x = col * char_w;
+                    int y = y_start + (row * line_h);
+                    
+                    if (inv) {
+                        display.fillRect(x, y - 8, char_w, line_h, GxEPD_BLACK);
+                        u8g2.setFontMode(1); 
+                        u8g2.setForegroundColor(GxEPD_WHITE);
+                        u8g2.setBackgroundColor(GxEPD_BLACK);
+                    } else {
+                        u8g2.setFontMode(1); 
+                        u8g2.setForegroundColor(GxEPD_BLACK);
+                        u8g2.setBackgroundColor(GxEPD_WHITE);
+                    }
+                    u8g2.setCursor(x, y);
+                    u8g2.print(ch);
+                }
+            }
+        }
+        if (term.isCursorVisible()) {
+            int cx = term.getCursorX();
+            int cy = term.getCursorY();
+            if (cx >= 0 && cx < TERM_COLS && cy >= 0 && cy < TERM_ROWS) {
+                int c_x_px = cx * char_w;
+                int c_y_px = y_start + (cy * line_h);
+                char cursorChar = ' ';
+                const char* line = term.getLine(cy);
+                // Simple bounds check for line length to pick character under cursor
+                // But getLine returns a fixed width buffer or null terminated?
+                // Assuming it's valid.
+                int len = 0;
+                while(line[len] != 0 && len < TERM_COLS) len++;
+                
+                if (cx < len) cursorChar = line[cx];
+                
+                display.fillRect(c_x_px, c_y_px - 8, char_w, line_h, GxEPD_BLACK);
+                u8g2.setFontMode(1);
+                u8g2.setForegroundColor(GxEPD_WHITE);
+                u8g2.setBackgroundColor(GxEPD_BLACK);
+                u8g2.setCursor(c_x_px, c_y_px);
+                u8g2.print(cursorChar);
+            }
+        }    
+    });
+}
+
+void UIManager::drawHelpScreen() {
+    setRefreshMode(false);
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+         int w = display.getWidth();
+         int h = display.getHeight();
+         
+         // Header
+         display.fillRect(0, 0, w, 24, GxEPD_BLACK);
+         u8g2.setForegroundColor(GxEPD_WHITE);
+         u8g2.setBackgroundColor(GxEPD_BLACK);
+         u8g2.setFont(u8g2_font_helvB12_tr);
+         u8g2.setCursor(5, 18);
+         u8g2.print("Help: Shortcuts");
+         
+         // Content
+         u8g2.setForegroundColor(GxEPD_BLACK);
+         u8g2.setBackgroundColor(GxEPD_WHITE);
+         u8g2.setFont(u8g2_font_helvR10_tr);
+         
+         int y = 40; int dy = 16;
+         u8g2.setCursor(5, y); u8g2.print("Mic + W/A/S/D : Arrows"); y+=dy;
+         u8g2.setCursor(5, y); u8g2.print("Mic + Q       : ESC"); y+=dy;
+         u8g2.setCursor(5, y); u8g2.print("Mic + E       : TAB"); y+=dy;
+         u8g2.setCursor(5, y); u8g2.print("Alt + 1-9     : F1-F9"); y+=dy;
+         u8g2.setCursor(5, y); u8g2.print("Alt + B       : Backlight"); y+=dy;
+         u8g2.setCursor(5, y); u8g2.print("Hold Side Btn : Sleep"); y+=dy;
+         u8g2.setCursor(5, y); u8g2.print("Mic Key       : Ctrl"); y+=dy;
+         y+=4;
+         u8g2.setCursor(5, y); u8g2.print("Menu Nav:"); y+=dy;
+         u8g2.setCursor(5, y); u8g2.print("Mic + W       : Up"); y+=dy;
+         u8g2.setCursor(5, y); u8g2.print("Mic + S       : Down"); y+=dy;
+         
+         // Footer
+         display.fillRect(0, h - 16, w, 16, GxEPD_BLACK);
+         u8g2.setForegroundColor(GxEPD_WHITE);
+         u8g2.setBackgroundColor(GxEPD_BLACK);
+         u8g2.setFont(u8g2_font_profont12_tf); 
+         u8g2.setCursor(5, h - 4);
+         u8g2.print("Press Key to Close");
     });
 }
 

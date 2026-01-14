@@ -2,6 +2,10 @@
 
 #include "../display_manager.h"
 #include <Arduino.h>
+#include <vector>
+
+class DisplayManager;
+class TerminalEmulator;
 
 class UIManager {
 public:
@@ -28,6 +32,11 @@ public:
     void drawStatusBar(const String& title, bool wifiConnected, int batteryPercent, bool isCharging);
     
     // Generic
+    void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex);
+    void drawInputScreen(const String& title, const String& currentText, bool isPassword = false);
+    void drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected);
+    void drawHelpScreen();
+
     void clearScreen(uint16_t color = GxEPD_WHITE);
     void drawCenteredText(int y, const String& text, const uint8_t* font);
     void drawTitleBar(const String& title);
