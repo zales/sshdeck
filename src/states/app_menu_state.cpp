@@ -16,8 +16,15 @@ void AppMenuState::update(App& app) {
 
     bool needsRedraw = false;
     int processed = 0;
-    while(app.keyboard.available() && processed < 5) {
+    while(processed < 5) {
         InputEvent event = app.pollInputs();
+        
+        if (event.type == EVENT_NONE) break;
+
+        if (event.type == EVENT_SYSTEM && event.systemCode == SYS_EVENT_SLEEP) {
+            app.enterDeepSleep();
+            return;
+        }
         
         // Only draw on the LAST event of the batch
         bool isLast = !app.keyboard.available() || processed >= 4;

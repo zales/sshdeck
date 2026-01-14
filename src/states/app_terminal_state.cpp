@@ -13,6 +13,14 @@ void AppTerminalState::update(App& app) {
     int processed = 0;
     while(app.keyboard.available() && processed < 5) {
         InputEvent event = app.pollInputs();
+
+        if (event.type == EVENT_NONE) break;
+
+        if (event.type == EVENT_SYSTEM && event.systemCode == SYS_EVENT_SLEEP) {
+            app.enterDeepSleep();
+            return;
+        }
+
         if (app.sshClient && app.sshClient->isConnected()) {
             if (event.type == EVENT_KEY_PRESS && event.key != 0) {
                 app.sshClient->write(event.key); // Send to network buffer
