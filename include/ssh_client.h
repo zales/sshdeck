@@ -26,6 +26,7 @@ public:
     bool isConnected() const { return ssh_connected; }
     const String& getConnectedHost() const { return connectedHost; }
     void process();  // Call in loop to handle SSH I/O
+    void write(char c); // Inject key
     
 private:
     TerminalEmulator& terminal;

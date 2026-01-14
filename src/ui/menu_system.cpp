@@ -1,117 +1,177 @@
 #include "ui/menu_system.h"
 #include "board_def.h"
+#include "keyboard_manager.h" // Added for blocking wrappers
 
-MenuSystem::MenuSystem(UIManager& u, KeyboardManager& k) 
-    : ui(u), keyboard(k) {
+MenuSystem::MenuSystem(UIManager& u) 
+    : ui(u), state(MENU_IDLE), confirmed(false) {
 }
 
-void MenuSystem::setIdleCallback(std::function<void()> callback) {
-    idleCallback = callback;
+void MenuSystem::showMenu(const String& title, const std::vector<String>& items) {
+    config.title = title;
+    config.items = items;
+    config.selected = 0;
+    state = MENU_LIST;
+    confirmed = false;
+    draw();
 }
 
-int MenuSystem::showMenu(const String& title, const std::vector<String>& items) {
-    int selected = 0;
-    bool needsRedraw = true;
-    
-    // Clear keyboard buffer
-    keyboard.clearBuffer(); 
-    
-    while (true) {
-        if (idleCallback) idleCallback();
+void MenuSystem::showInput(const String& title, const String& initial, bool isPassword) {
+    config.title = title;
+    config.inputText = initial;
+    config.isPassword = isPassword;
+    state = MENU_INPUT;
+    confirmed = false;
+    draw();
+}
 
-        if (needsRedraw) {
-            ui.drawMenu(title, items, selected);
-            needsRedraw = false;
-        }
-        
-        // Wait for input
-        if (keyboard.available()) {
-            char c = keyboard.getKeyChar();
-            
-            if (c == 0) continue; 
+void MenuSystem::showMessage(const String& title, const String& msg) {
+    config.title = title;
+    config.message = msg;
+    state = MENU_MESSAGE;
+    confirmed = false;
+    draw();
+}
 
-            bool handled = false;
-            bool up = false;
-            bool down = false;
-            
-            if (c == 'w') up = true;
-            if (c == 's') down = true;
-            if (c == 'w' && keyboard.isMicActive()) up = true;
-            if (c == 's' && keyboard.isMicActive()) down = true;
-            
-            if (up) { 
-                 selected--;
-                 if (selected < 0) selected = items.size() - 1;
-                 handled = true;
-            }
-            else if (down) { 
-                 selected++;
-                 if (selected >= items.size()) selected = 0;
-                 handled = true;
-            }
-            
-            if (c == '\n') { // Enter
-                return selected;
-            }
-            
-            if (c == 0x1B || c == 0x03 || c == 0x11) { // ESC, Ctrl+C, Ctrl+Q
-                return -1;
-            }
-            
-            if (handled) {
-                needsRedraw = true;
-            }
-        }
-        delay(10);
+void MenuSystem::draw() {
+    switch (state) {
+        case MENU_LIST:
+            ui.drawMenu(config.title, config.items, config.selected);
+            break;
+        case MENU_INPUT:
+            ui.drawInputScreen(config.title, config.inputText, config.isPassword);
+            break;
+        case MENU_MESSAGE:
+            ui.drawMessage(config.title, config.message);
+            break;
+        case MENU_IDLE:
+        default:
+            break;
     }
 }
 
-
-bool MenuSystem::textInput(const String& title, String& result, bool isPassword) {
-    bool needsRedraw = true;
+bool MenuSystem::handleInput(InputEvent e) {
+    if (state == MENU_IDLE) return false;
     
-    keyboard.clearBuffer();
+    // Ignore non-keypress events for now
+    if (e.type != EVENT_KEY_PRESS) return false;
     
-    while (true) {
-        if (idleCallback) idleCallback();
+    char c = e.key;
+    if (c == 0) return false;
 
-        if (needsRedraw) {
-            ui.drawInputScreen(title, result, isPassword);
-            needsRedraw = false;
+    if (state == MENU_LIST) {
+        bool changed = false;
+        
+        bool up = (c == 'w'); 
+        bool down = (c == 's'); 
+        // Additional mapping can be handled by caller or here
+        
+        if (up) {
+            config.selected--;
+            if (config.selected < 0) config.selected = config.items.size() - 1;
+            changed = true;
+        } else if (down) {
+            config.selected++;
+            if (config.selected >= (int)config.items.size()) config.selected = 0;
+            changed = true;
+        } else if (c == '\n') { // Enter
+            confirmed = true;
+            state = MENU_IDLE; 
+            return true; 
+        } else if (c == 0x1B || c == 0x03 || c == 0x11) { // ESC
+            confirmed = false;
+            config.selected = -1;
+            state = MENU_IDLE;
+            return true;
         }
         
-        if (keyboard.available()) {
-            char c = keyboard.getKeyChar();
-            
-            if (c == '\n') return true;
-            if (c == 0x1B || c == 0x03 || c == 0x11) return false; 
-            
-            if (c == 0x08) { // Backspace
-                if (result.length() > 0) {
-                    result.remove(result.length() - 1);
-                    needsRedraw = true;
-                }
-            } else if (c >= 32 && c <= 126) {
-                result += c;
-                needsRedraw = true;
-            }
+        if (changed) {
+            draw();
+            return true;
         }
-        delay(10);
+    } 
+    else if (state == MENU_INPUT) {
+        if (c == '\n') {
+            confirmed = true;
+            state = MENU_IDLE;
+            return true;
+        } else if (c == 0x1B || c == 0x03 || c == 0x11) {
+            confirmed = false;
+            state = MENU_IDLE;
+            return true;
+        } else if (c == 0x08) { // Backspace
+            if (config.inputText.length() > 0) {
+                config.inputText.remove(config.inputText.length() - 1);
+                draw();
+                return true;
+            }
+        } else if (c >= 32 && c <= 126) {
+            config.inputText += c;
+            draw();
+            return true;
+        }
     }
+    else if (state == MENU_MESSAGE) {
+        // Any key dismisses
+        confirmed = true;
+        state = MENU_IDLE;
+        return true;
+    }
+
+    return false;
+}
+
+int MenuSystem::showMenuBlocking(const String& title, const std::vector<String>& items, KeyboardManager& kb, std::function<void()> idleCb) {
+    showMenu(title, items);
+    while (isRunning()) {
+        // Poll keyboard
+        kb.loop(); 
+        if (idleCb) idleCb();
+        if (kb.available()) {
+            InputEvent e;
+            e.type = EVENT_KEY_PRESS;
+            e.key = kb.getKeyChar();
+            handleInput(e);
+        } else {
+             delay(10);
+        }
+    }
+    return isConfirmed() ? getSelection() : -1;
+}
+
+bool MenuSystem::textInputBlocking(const String& title, String& result, KeyboardManager& kb, bool isPassword, std::function<void()> idleCb) {
+    showInput(title, result, isPassword);
+    while (isRunning()) {
+        kb.loop();
+        if (idleCb) idleCb();
+        if (kb.available()) {
+            InputEvent e;
+            e.type = EVENT_KEY_PRESS;
+            e.key = kb.getKeyChar();
+            handleInput(e);
+        } else {
+             delay(10);
+        }
+    }
+    if (isConfirmed()) {
+        result = getInputResult();
+        return true;
+    }
+    return false;
 }
 
 
-void MenuSystem::drawMessage(const String& title, const String& msg) {
-    ui.drawMessage(title, msg);
-    
-    // Wait for key
-    delay(500);
-    while(true) {
-        if (idleCallback) idleCallback();
-        if(keyboard.isKeyPressed()) {
-             keyboard.getKeyChar(); // consume
-             break;
+void MenuSystem::showMessageBlocking(const String& title, const String& msg, KeyboardManager& kb) {
+    showMessage(title, msg);
+    delay(500); // Debounce initial press
+    while (isRunning()) {
+        kb.loop();
+        if (kb.available()) {
+            InputEvent e;
+            e.type = EVENT_KEY_PRESS;
+            e.key = kb.getKeyChar();
+            handleInput(e);
+        } else {
+             delay(10);
         }
-        delay(50);
     }
 }

@@ -53,6 +53,10 @@ private:
     void checkSystemInput();
     void unlockSystem();
 
+    // Event Loop Logic
+    InputEvent pollInputs();
+    void handleMainMenuSelection(int choice);
+
     // UI & Logic
     void drawTerminalScreen();
     void showHelpScreen();

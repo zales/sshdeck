@@ -203,7 +203,7 @@ void SSHClient::process() {
         mic_shortcut_used = false;
     }
 
-    processKeyboardInput();
+    // processKeyboardInput(); handled externally via write()
     processSSHOutput();
 
     // Check for Long Press Mic (Help)
@@ -217,52 +217,42 @@ void SSHClient::process() {
     }
 }
 
-void SSHClient::processKeyboardInput() {
-    // Process all pending key events
-    while (keyboard.available() > 0) {
-        char c = keyboard.getKeyChar();
-        
-        if (c == 0) continue; // Skip release events or modifier-only changes
-        
-        // shortcuts via Mic (which is Ctrl)
-        if (keyboard.isMicActive()) {
-             mic_shortcut_used = true;
-             
-             // Since Mic is Ctrl, 'c' is already a Control character (1-26) if it was a-z
-             // We need to check what the physical key was, or infer from the control char.
-             // Ctrl + W is 23 ('w' - 'a' + 1)
-             // Ctrl + A is 1
-             // Ctrl + S is 19
-             // Ctrl + D is 4
-             // Ctrl + Q is 17
-             // Ctrl + E is 5
-             // Ctrl + H is 8 (Backspace usually, but here 'h')
-             
-             // Restore base char for mapping check
-             char base = 0;
-             if (c >= 1 && c <= 26) {
-                 base = c + 'a' - 1;
-             }
-             
-             if (base == 'h') {
-                 if(onHelp) onHelp();
-                 continue;
-             }
-             
-             if (base != 0 && handleMicShortcuts(base)) {
-                 continue;
-             }
-             // If not handled as shortcut, fall through to send the Ctrl character (e.g. Ctrl-C)
-        }
-        
-        // shortcuts via Alt (F1-F9)
-        if (keyboard.isAltActive()) {
-            if (handleAltShortcuts(c)) continue;
-        }
-        
-        // Regular character
-        ssh_channel_write(channel, &c, 1);
+void SSHClient::write(char c) {
+    if (!ssh_connected) return;
+
+    if (c == 0) return; 
+    
+    // shortcuts via Mic (which is Ctrl)
+    if (keyboard.isMicActive()) {
+            mic_shortcut_used = true;
+            
+            // Since Mic is Ctrl, 'c' is already a Control character (1-26) if it was a-z
+            // We need to check what the physical key was, or infer from the control char.
+            
+            // Restore base char for mapping check
+            char base = 0;
+            if (c >= 1 && c <= 26) {
+                base = c + 'a' - 1;
+            }
+            
+            if (base == 'h') {
+                if(onHelp) onHelp();
+                return;
+            }
+            
+            if (base != 0 && handleMicShortcuts(base)) {
+                return;
+            }
+            // If not handled as shortcut, fall through to send the Ctrl character (e.g. Ctrl-C)
     }
+    
+    // shortcuts via Alt (F1-F9)
+    if (keyboard.isAltActive()) {
+        if (handleAltShortcuts(c)) return;
+    }
+    
+    // Regular character
+    ssh_channel_write(channel, &c, 1);
 }
 
 bool SSHClient::handleAltShortcuts(char c) {

@@ -23,12 +23,7 @@ void App::setup() {
 
     serverManager.setSecurityManager(&security);
     serverManager.begin();
-    menu = new MenuSystem(ui, keyboard);
-    // Bind member function via lambda
-    menu->setIdleCallback([this]() { 
-        this->checkSystemInput(); 
-        ui.updateStatusState(power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
-    });
+    menu = new MenuSystem(ui);
     
     Serial.println("Setup complete, entering menu...");
 }
@@ -92,19 +87,54 @@ void App::initializeHardware() {
     ui.updateBootStatus("Keyboard OK");
 }
 
-void App::loop() {
-    ota.loop();
+InputEvent App::pollInputs() {
     keyboard.loop();
     if (keyboard.getSystemEvent() == SYS_EVENT_SLEEP) {
+        return InputEvent(EVENT_SYSTEM, SYS_EVENT_SLEEP);
+    }
+    if (keyboard.available()) {
+        return InputEvent(keyboard.getKeyChar());
+    }
+    return InputEvent();
+}
+
+void App::loop() {
+    ota.loop();
+    
+    // Status update logic
+    static unsigned long lastStatusUpdate = 0;
+    if (millis() - lastStatusUpdate > 1000) {
+        ui.updateStatusState(power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
+        lastStatusUpdate = millis();
+    }
+    
+    InputEvent event = pollInputs();
+    if (event.type == EVENT_SYSTEM && event.systemCode == SYS_EVENT_SLEEP) {
         enterDeepSleep();
+        return;
     }
 
     if (currentState == STATE_MENU) {
-        handleMainMenu();
+        if (!menu->isRunning()) {
+            handleMainMenu();
+        }
+        
+        if (menu->handleInput(event)) {
+             // UI updated internally
+        }
+        
+        if (!menu->isRunning() && menu->isConfirmed()) {
+             handleMainMenuSelection(menu->getSelection());
+        }
     } else {
         // STATE_TERMINAL
         if (sshClient && sshClient->isConnected()) {
             sshClient->process();
+            
+            // Forward input to SSH client
+            if (event.type == EVENT_KEY_PRESS && event.key != 0) {
+                sshClient->write(event.key);
+            }
             
             bool forceRedraw = false;
             // Battery Charging Animation (every 1 sec)
@@ -120,6 +150,7 @@ void App::loop() {
             if (!sshClient->isConnected()) {
                 currentState = STATE_MENU;
                 ui.drawMessage("Disconnected", "Session Ended");
+                delay(1000); // Give user time to see
             }
         } else {
             currentState = STATE_MENU;
@@ -135,9 +166,10 @@ void App::handleMainMenu() {
         "Settings",
         "Power Off"
     };
-    
-    int choice = menu->showMenu("Main Menu", items);
-    
+    menu->showMenu("Main Menu", items);
+}
+
+void App::handleMainMenuSelection(int choice) {
     if (choice == 0) {
         handleSavedServers();
     } else if (choice == 1) {
@@ -175,7 +207,7 @@ void App::handleSystemUpdate() {
          String newVer = ota.checkUpdateAvailable(url, APP_VERSION, UPDATE_ROOT_CA);
          if (newVer == "") {
             std::vector<String> opts = {"Reinstall?", "Cancel"};
-            if (menu->showMenu("No update found", opts) != 0) return;
+            if (menu->showMenuBlocking("No update found", opts, keyboard) != 0) return;
             ota.updateFromUrl(url, UPDATE_ROOT_CA);
          } else {
              // Logic for simple update
@@ -198,7 +230,7 @@ void App::handleSystemUpdate() {
     options.push_back("Back");
 
     while (true) {
-        int selected = menu->showMenu("Select Version", options);
+        int selected = menu->showMenuBlocking("Select Version", options, keyboard);
         if (selected < 0 || selected >= urls.size()) return; // Back or cancelled
 
         String targetUrl = urls[selected];
@@ -206,7 +238,7 @@ void App::handleSystemUpdate() {
         
         // Confirmation
         std::vector<String> confirmOpts = {"Yes, Flash it", "No"};
-        if (menu->showMenu("Flash v" + targetVer + "?", confirmOpts) == 0) {
+        if (menu->showMenuBlocking("Flash v" + targetVer + "?", confirmOpts, keyboard) == 0) {
             ota.updateFromUrl(targetUrl, UPDATE_ROOT_CA);
             // If update fails, it returns here
             ui.drawMessage("Error", "Update Failed");
@@ -300,7 +332,7 @@ void App::connectToServer(const String& host, int port, const String& user, cons
                 }
             });
             if (!wifi.connect()) {
-                menu->drawMessage("Error", "WiFi Failed");
+                menu->showMessageBlocking("Error", "WiFi Failed", keyboard);
                 return;
             }
     }
@@ -332,7 +364,7 @@ void App::connectToServer(const String& host, int port, const String& user, cons
 
             // Optional: Don't show the "Error" popup if the log was informative enough?
             // But keeping it for consistency.
-            menu->drawMessage("Error", "SSH Failed");
+            menu->showMessageBlocking("Error", "SSH Failed", keyboard);
     }
 }
 
@@ -344,41 +376,41 @@ void App::handleSavedServers() {
         }
         items.push_back("[ Add New Server ]");
 
-        int choice = menu->showMenu("Saved Servers", items);
+        int choice = menu->showMenuBlocking("Saved Servers", items, keyboard);
         
         if (choice < 0) return; // Back
         
         if (choice == items.size() - 1) {
             ServerConfig newSrv;
             String p = "22";
-            if (menu->textInput("Name", newSrv.name) && 
-                menu->textInput("Host", newSrv.host) &&
-                menu->textInput("User", newSrv.user) &&
-                menu->textInput("Port", p) &&
-                menu->textInput("Password", newSrv.password)) {
+            if (menu->textInputBlocking("Name", newSrv.name, keyboard) && 
+                menu->textInputBlocking("Host", newSrv.host, keyboard) &&
+                menu->textInputBlocking("User", newSrv.user, keyboard) &&
+                menu->textInputBlocking("Port", p, keyboard) &&
+                menu->textInputBlocking("Password", newSrv.password, keyboard)) {
                     newSrv.port = p.toInt();
                     serverManager.addServer(newSrv);
             }
         } else {
             ServerConfig selected = serverManager.getServer(choice);
             std::vector<String> actions = {"Connect", "Edit", "Delete"};
-            int action = menu->showMenu(selected.name, actions);
+            int action = menu->showMenuBlocking(selected.name, actions, keyboard);
 
             if (action == 0) { // Connect
                 connectToServer(selected.host, selected.port, selected.user, selected.password, selected.name);
                 return;
             } else if (action == 1) { // Edit
                  String p = String(selected.port);
-                 menu->textInput("Name", selected.name);
-                 menu->textInput("Host", selected.host);
-                 menu->textInput("User", selected.user);
-                 menu->textInput("Port", p);
+                 menu->textInputBlocking("Name", selected.name, keyboard);
+                 menu->textInputBlocking("Host", selected.host, keyboard);
+                 menu->textInputBlocking("User", selected.user, keyboard);
+                 menu->textInputBlocking("Port", p, keyboard);
                  selected.port = p.toInt();
-                 menu->textInput("Password", selected.password);
+                 menu->textInputBlocking("Password", selected.password, keyboard);
                  serverManager.updateServer(choice, selected);
             } else if (action == 2) { // Delete
                  std::vector<String> yn = {"No", "Yes"};
-                 if (menu->showMenu("Delete?", yn) == 1) {
+                 if (menu->showMenuBlocking("Delete?", yn, keyboard) == 1) {
                     serverManager.removeServer(choice);
                  }
             }
@@ -392,10 +424,10 @@ void App::handleQuickConnect() {
      s.port = 22;
      String p = "22";
      
-     if (menu->textInput("Host / IP", s.host) &&
-         menu->textInput("Port", p) &&
-         menu->textInput("User", s.user) &&
-         menu->textInput("Password", s.password, true)) {
+     if (menu->textInputBlocking("Host / IP", s.host, keyboard) &&
+         menu->textInputBlocking("Port", p, keyboard) &&
+         menu->textInputBlocking("User", s.user, keyboard) &&
+         menu->textInputBlocking("Password", s.password, keyboard, true)) {
              s.port = p.toInt();
              connectToServer(s.host, s.port, s.user, s.password, s.name);
      }
@@ -412,7 +444,7 @@ void App::handleSettings() {
             "Battery Info",
             "Back"
         };
-        int choice = menu->showMenu("Settings", items);
+        int choice = menu->showMenuBlocking("Settings", items, keyboard);
         
         if (choice == 0) {
             handleChangePin();
@@ -436,7 +468,7 @@ void App::handleSettings() {
             
             keyboard.clearBuffer();
             while(!keyboard.isKeyPressed()) {
-                if (wifi.getIdleCallback()) wifi.getIdleCallback()(); // Keep power mgmt alive
+                if (wifi.getIdleCallback()) wifi.getIdleCallback()(); 
                 delay(50);
             }
             keyboard.getKeyChar(); // consume the key
@@ -536,8 +568,8 @@ void App::handleStorage() {
     // 1. Automatically activate USB Mode on entry
     bool usbActive = storage.startUSBMode();
     
-    // Set idle callback to check for host ejection
-    menu->setIdleCallback([this]() {
+    // Lambda for checking eject in blocking menu
+    auto storageIdle = [this]() {
         this->checkSystemInput();
         if (storage.isEjectRequested()) {
             storage.clearEjectRequest();
@@ -545,7 +577,7 @@ void App::handleStorage() {
              delay(1000);
              exitStorageMode();
         }
-    });
+    };
 
     if (usbActive) {
         ui.drawMessage("USB Active", "Connect to PC\nCopy id_rsa");
@@ -563,12 +595,9 @@ void App::handleStorage() {
         };
         
         String title = storage.isUSBActive() ? "Storage (USB ON)" : "Storage (No USB)";
-        int choice = menu->showMenu(title, items);
+        int choice = menu->showMenuBlocking(title, items, keyboard, storageIdle);
         
         if (choice == 0) { // Scan USB
-             // USB mode should already be running.
-             // If not, try to start it (if it failed initially) or just scan what we have.
-             
              ui.drawMessage("Scanning...", "Checking Disk...");
              String key = storage.scanRAMDiskForKey();
              
@@ -599,7 +628,6 @@ void App::handleStorage() {
             if (usbActive) {
                 exitStorageMode();
             }
-            menu->setIdleCallback([this](){ this->checkSystemInput(); });
             return;
         }
     }
@@ -607,8 +635,6 @@ void App::handleStorage() {
 
 void App::exitStorageMode() {
     storage.stopUSBMode();
-    // Reset idle callback
-    if (menu) menu->setIdleCallback([this](){ this->checkSystemInput(); });
     
     // Restart for full USB Stack reset
     ui.drawMessage("Restarting...", "Switching Mode");

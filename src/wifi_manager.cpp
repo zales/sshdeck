@@ -113,10 +113,9 @@ void WifiManager::refreshScreen() {
 String WifiManager::readInput(const String& prompt, bool passwordMask) {
     
     ui.updateStatusState(power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
-    MenuSystem menu(ui, keyboard);
-    menu.setIdleCallback(idleCallback);
+    MenuSystem menu(ui);
     String result = "";
-    if (menu.textInput(prompt, result, passwordMask)) {
+    if (menu.textInputBlocking(prompt, result, keyboard, passwordMask, idleCallback)) {
         return result;
     }
     return "";
@@ -125,8 +124,7 @@ String WifiManager::readInput(const String& prompt, bool passwordMask) {
 bool WifiManager::connect() {
     loadCredentials();
     
-    MenuSystem menu(ui, keyboard);
-    menu.setIdleCallback(idleCallback);
+    MenuSystem menu(ui);
 
     // Auto-connect attempt
     if (lastUsedIndex >= 0 && lastUsedIndex < MAX_SAVED_NETWORKS) {
@@ -190,7 +188,7 @@ bool WifiManager::connect() {
         labels.push_back("Exit (Offline)");
         actions.push_back([](){}); 
 
-        int choice = menu.showMenu("WiFi Manager", labels);
+        int choice = menu.showMenuBlocking("WiFi Manager", labels, keyboard, idleCallback);
         
         // Check connectivity first, maybe an action connected us
         if (WiFi.status() == WL_CONNECTED) {
@@ -316,8 +314,8 @@ void WifiManager::scanAndSelect() {
     }
     
     if (n <= 0) {
-        MenuSystem menu(ui, keyboard);
-        menu.drawMessage("Scan Results", "No Networks Found");
+        MenuSystem menu(ui);
+        menu.showMessageBlocking("Scan Results", "No Networks Found", keyboard);
         return; 
     }
     
@@ -353,8 +351,7 @@ void WifiManager::scanAndSelect() {
         return a.rssi > b.rssi;
     });
     
-    MenuSystem menu(ui, keyboard);
-    menu.setIdleCallback(idleCallback);
+    MenuSystem menu(ui);
     while (true) {
         std::vector<String> labels;
         for(const auto& r : results) {
@@ -367,7 +364,7 @@ void WifiManager::scanAndSelect() {
         }
         labels.push_back("[ Rescan ]");
         
-        int choice = menu.showMenu("Scan Results", labels);
+        int choice = menu.showMenuBlocking("Scan Results", labels, keyboard, idleCallback);
         
         if (choice < 0) return; // ESC
         
@@ -391,14 +388,14 @@ void WifiManager::scanAndSelect() {
             }
             
             if (!known && results[choice].secure) {
-                if (!menu.textInput("Password", pass, true)) {
+                if (!menu.textInputBlocking("Password", pass, keyboard, true, idleCallback)) {
                     continue; // Cancelled password entry
                 }
             }
             
             if (tryConnect(ssid, pass)) {
                 saveCredentials(ssid, pass);
-                menu.drawMessage("Success", "Connected!");
+                menu.showMessageBlocking("Success", "Connected!", keyboard);
                 // Update last index
                 for(int k=0; k<maxSavedIndex; k++) {
                     if(savedNetworks[k].ssid == ssid) {
@@ -410,7 +407,7 @@ void WifiManager::scanAndSelect() {
                 }
                 return;
             } else {
-                menu.drawMessage("Error", "Connection Failed");
+                menu.showMessageBlocking("Error", "Connection Failed", keyboard);
             }
         }
     }
@@ -444,8 +441,7 @@ void WifiManager::deleteCredential(int index) {
 void WifiManager::manage() {
     loadCredentials();
     
-    MenuSystem menu(ui, keyboard);
-    menu.setIdleCallback(idleCallback);
+    MenuSystem menu(ui);
     
     while(true) {
         std::vector<String> items;
@@ -463,7 +459,7 @@ void WifiManager::manage() {
             items.push_back(label);
         }
         
-        int choice = menu.showMenu("WiFi Manager", items);
+        int choice = menu.showMenuBlocking("WiFi Manager", items, keyboard, idleCallback);
         
         if (choice < 0) return; // ESC/Back
         
@@ -474,16 +470,16 @@ void WifiManager::manage() {
         }
         else if (choice == 1) {
             String s, p;
-            if (menu.textInput("SSID", s)) {
+            if (menu.textInputBlocking("SSID", s, keyboard, false, idleCallback)) {
                 if (s.length() > 0) {
-                     menu.textInput("Password", p, true); // Allow empty pass
+                     menu.textInputBlocking("Password", p, keyboard, true, idleCallback); // Allow empty pass
                      if (tryConnect(s, p)) {
                          saveCredentials(s, p);
-                         menu.drawMessage("Success", "Connected & Saved");
+                         menu.showMessageBlocking("Success", "Connected & Saved", keyboard);
                      } else {
                          // Save anyway?
                          std::vector<String> yn = {"Yes", "No"};
-                         if (menu.showMenu("Connect Failed. Save?", yn) == 0) {
+                         if (menu.showMenuBlocking("Connect Failed. Save?", yn, keyboard, idleCallback) == 0) {
                              saveCredentials(s, p);
                          }
                      }
@@ -502,31 +498,31 @@ void WifiManager::manage() {
                 acts.push_back("Edit Password");
                 acts.push_back("Delete");
                 
-                int act = menu.showMenu(sel, acts);
+                int act = menu.showMenuBlocking(sel, acts, keyboard, idleCallback);
                 
                 if (act == 0) { // Connect
                     if(tryConnect(savedNetworks[idx].ssid, savedNetworks[idx].pass)) {
-                        menu.drawMessage("Success", "Connected");
+                        menu.showMessageBlocking("Success", "Connected", keyboard);
                         // Save usage preference
                          preferences.begin("tdeck-wifi", false);
                          preferences.putInt("last_index", idx);
                          preferences.end();
                         return;
                     } else {
-                        menu.drawMessage("Error", "Connect Failed");
+                        menu.showMessageBlocking("Error", "Connect Failed", keyboard);
                     }
                 }
                 else if (act == 1) { // Edit
                     String p = savedNetworks[idx].pass;
-                    if (menu.textInput("New Password", p, true)) {
+                    if (menu.textInputBlocking("New Password", p, keyboard, true, idleCallback)) {
                         saveCredentials(sel, p);
                         loadCredentials();
-                        menu.drawMessage("Saved", "Password Updated");
+                        menu.showMessageBlocking("Saved", "Password Updated", keyboard);
                     }
                 }
                 else if (act == 2) { // Delete
                     std::vector<String> yn = {"No", "Yes"};
-                    if (menu.showMenu("Delete " + sel + "?", yn) == 1) {
+                    if (menu.showMenuBlocking("Delete " + sel + "?", yn, keyboard, idleCallback) == 1) {
                          deleteCredential(idx);
                          loadCredentials(); // Refresh memory just in case
                          // loadCredentials actually reads from NVS, deleteCredential updates arrays too but simplest to be in sync
