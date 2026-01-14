@@ -19,6 +19,11 @@ public:
     void drawBootScreen(const String& line1, const String& line2);
     void updateBootStatus(const String& status);
     
+    // Wifi related screens
+    void drawAutoConnectScreen(const String& ssid, int remainingSeconds, int batteryPercent, bool isCharging);
+    void drawScanningScreen(int batteryPercent, bool isCharging);
+    void drawConnectingScreen(const String& ssid, const String& password, int batteryPercent, bool isCharging);
+
     // Elements
     void drawStatusBar(const String& title, bool wifiConnected, int batteryPercent, bool isCharging);
     

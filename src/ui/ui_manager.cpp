@@ -181,6 +181,73 @@ void UIManager::updateBootStatus(const String& status) {
     });
 }
 
+void UIManager::drawAutoConnectScreen(const String& ssid, int remainingSeconds, int batteryPercent, bool isCharging) {
+    display.setRefreshMode(true); // Partial refresh for countdown
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        display.getDisplay().fillScreen(GxEPD_WHITE);
+        
+        drawStatusBar("Wifi Setup", false, batteryPercent, isCharging);
+        
+        u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
+        u8g2.setFont(u8g2_font_helvB10_tr);
+        
+        u8g2.setCursor(10, 50);
+        u8g2.print("Auto-Connecting...");
+
+        u8g2.setFont(u8g2_font_helvR12_tr);
+        u8g2.setCursor(10, 80);
+        u8g2.print(ssid);
+        
+        u8g2.setFont(u8g2_font_helvR10_tr);
+        u8g2.setCursor(10, 120);
+        u8g2.print("Start in: " + String(remainingSeconds) + "s");
+        
+        u8g2.setCursor(10, 150);
+        u8g2.print("Press 'q' or 'Mic+Q' to cancel");
+    });
+}
+
+void UIManager::drawScanningScreen(int batteryPercent, bool isCharging) {
+    display.setRefreshMode(false); // Full refresh for scanning
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+         display.getDisplay().fillScreen(GxEPD_WHITE);
+         
+         drawStatusBar("Network Scan", false, batteryPercent, isCharging);
+         
+         u8g2.setFont(u8g2_font_helvB12_tr);
+         u8g2.setForegroundColor(GxEPD_BLACK);
+         u8g2.setBackgroundColor(GxEPD_WHITE);
+         
+         // Center text
+         String title = "Scanning...";
+         int tw = u8g2.getUTF8Width(title.c_str());
+         u8g2.setCursor((width() - tw) / 2, 120);
+         u8g2.print(title);
+    });
+}
+
+void UIManager::drawConnectingScreen(const String& ssid, const String& password, int batteryPercent, bool isCharging) {
+    display.setRefreshMode(false);
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+         display.getDisplay().fillScreen(GxEPD_WHITE);
+         
+         drawStatusBar("Connecting...", false, batteryPercent, isCharging);
+
+         u8g2.setFont(u8g2_font_helvB12_tr);
+         u8g2.setForegroundColor(GxEPD_BLACK);
+         u8g2.setBackgroundColor(GxEPD_WHITE);
+         
+         u8g2.setCursor(10, 80);
+         String msg = "Connecting to:\n" + ssid;
+         u8g2.print(msg);
+         
+         u8g2.setFont(u8g2_font_helvR10_tr);
+         u8g2.setCursor(10, 120);
+         u8g2.print("Password: " + String(password.length() > 0 ? "***" : "Open"));
+    });
+}
+
 void UIManager::render(std::function<void(U8G2_FOR_ADAFRUIT_GFX&)> drawCallback) {
     display.firstPage();
     do {

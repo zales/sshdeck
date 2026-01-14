@@ -142,42 +142,8 @@ bool WifiManager::connect() {
                 // Only redraw if the second changed
                 if (remain != lastRemain) {
                     lastRemain = remain;
-                    
-                    // Partial refresh is faster and less blinky
-                    display.setRefreshMode(true);
-                    
-                    // Render stylish auto-connect screen
-                    display.getDisplay().firstPage();
-                    do {
-                        display.getDisplay().fillScreen(GxEPD_WHITE);
-                        
-                        // Draw Consistent Status Bar
-                        ui.drawStatusBar("Wifi Setup", false, power.getPercentage(), power.isCharging());
-
-                        int w = display.getWidth();
-                        auto& u8g2 = display.getFonts();
-                        
-                        // Content
-                        u8g2.setForegroundColor(GxEPD_BLACK);
-                        u8g2.setBackgroundColor(GxEPD_WHITE);
-                        u8g2.setFont(u8g2_font_helvB10_tr);
-                        
-                        u8g2.setCursor(10, 50);
-                        u8g2.print("Auto-Connecting...");
-
-                        u8g2.setFont(u8g2_font_helvR12_tr);
-                        u8g2.setCursor(10, 80);
-                        u8g2.print(savedNetworks[lastUsedIndex].ssid);
-                        
-                        // Countdown and Cancel instruction
-                        u8g2.setFont(u8g2_font_helvR10_tr);
-                        u8g2.setCursor(10, 120);
-                        u8g2.print("Start in: " + String(remain) + "s");
-                        
-                        u8g2.setCursor(10, 150);
-                        u8g2.print("Press 'q' or 'Mic+Q' to cancel");
-                        
-                    } while (display.getDisplay().nextPage());
+                    // Use UIManager to draw the frame
+                    ui.drawAutoConnectScreen(savedNetworks[lastUsedIndex].ssid, remain, power.getPercentage(), power.isCharging());
                 }
                 
                 if (keyboard.isKeyPressed()) {
@@ -271,21 +237,8 @@ bool WifiManager::connect() {
 
 bool WifiManager::tryConnect(const String& ssid, const String& pass) {
     UIManager ui(display);
-    display.getDisplay().firstPage();
-    do {
-         display.getDisplay().fillScreen(GxEPD_WHITE);
-         
-         ui.drawStatusBar("Connecting...", false, power.getPercentage(), power.isCharging());
-
-         auto& u8g2 = display.getFonts();
-         u8g2.setFont(u8g2_font_6x10_tr);
-         u8g2.setForegroundColor(GxEPD_BLACK);
-         u8g2.setBackgroundColor(GxEPD_WHITE);
-         
-         u8g2.setCursor(10, 45); // Moved down slightly
-         u8g2.print("Target: ");
-         u8g2.print(ssid.c_str());
-    } while (display.getDisplay().nextPage());
+    // Use UIManager
+    ui.drawConnectingScreen(ssid, pass, power.getPercentage(), power.isCharging());
     
     // Set Hostname before connecting (must be done before WiFi.begin() or mode() in some versions, 
     // but safe to do here)
@@ -321,25 +274,10 @@ bool WifiManager::tryConnect(const String& ssid, const String& pass) {
 }
 
 void WifiManager::scanAndSelect() {
-    UIManager ui(display); // Create early for status bar
-    display.getDisplay().firstPage();
-    do {
-         display.getDisplay().fillScreen(GxEPD_WHITE);
-         
-         ui.drawStatusBar("Network Scan", false, power.getPercentage(), power.isCharging());
-         
-         auto& u8g2 = display.getFonts();
-         u8g2.setFont(u8g2_font_helvB12_tr);
-         u8g2.setForegroundColor(GxEPD_BLACK);
-         u8g2.setBackgroundColor(GxEPD_WHITE);
-         
-         // Center text
-         int w = display.getWidth();
-         String title = "Scanning...";
-         int tw = u8g2.getUTF8Width(title.c_str());
-         u8g2.setCursor((w - tw) / 2, 120);
-         u8g2.print(title);
-    } while (display.getDisplay().nextPage());
+    UIManager ui(display);
+    
+    // Use UIManager
+    ui.drawScanningScreen(power.getPercentage(), power.isCharging());
     
     int n = WiFi.scanNetworks();
     
