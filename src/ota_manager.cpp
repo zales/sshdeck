@@ -117,6 +117,12 @@ bool OtaManager::updateFromUrl(const String& url, const String& rootCaCert) {
 
     HTTPClient http;
     WiFiClientSecure *client = new WiFiClientSecure;
+    if (!client) {
+        Serial.println("OTA: Failed to allocate WiFiClientSecure");
+        drawProgress(0, "Memory Error");
+        delay(2000);
+        return false;
+    }
 
     if (client) {
         if (rootCaCert.length() > 0) {
@@ -256,16 +262,17 @@ String OtaManager::checkUpdateAvailable(const String& binUrl, const String& curr
 
     if (verUrl.startsWith("https://")) {
         client = new WiFiClientSecure;
-        if (client) {
-            if (rootCaCert.length() > 0) {
-                client->setCACert(rootCaCert.c_str());
-            } else {
-                client->setInsecure();
-            }
-            http.begin(*client, verUrl);
-        } else {
-             http.begin(verUrl);
+        if (!client) {
+            Serial.println("OTA: Failed to allocate WiFiClientSecure");
+            return "";
         }
+        
+        if (rootCaCert.length() > 0) {
+            client->setCACert(rootCaCert.c_str());
+        } else {
+            client->setInsecure();
+        }
+        http.begin(*client, verUrl);
     } else {
         http.begin(verUrl);
     }
@@ -277,9 +284,16 @@ String OtaManager::checkUpdateAvailable(const String& binUrl, const String& curr
     if (httpCode < 0 && rootCaCert.length() > 0) {
         Serial.println("Check SSL Fail. Retrying Insecure...");
         http.end();
-        if (client) delete client;
+        if (client) {
+            delete client;
+            client = nullptr;
+        }
         
         client = new WiFiClientSecure;
+        if (!client) {
+            Serial.println("OTA: Failed to allocate WiFiClientSecure for retry");
+            return "";
+        }
         client->setInsecure();
         
         // Re-init connection

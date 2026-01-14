@@ -24,6 +24,7 @@ enum AppState {
 class App {
 public:
     App();
+    ~App();
     void setup();
     void loop();
 

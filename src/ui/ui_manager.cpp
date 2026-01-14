@@ -311,25 +311,47 @@ void UIManager::drawMenu(const String& title, const std::vector<String>& items, 
     });
 }
 
-void UIManager::drawInputScreen(const String& title, const String& currentText, bool isPassword) {
-    setRefreshMode(true);
+void UIManager::drawInputScreen(const String& title, const String& currentText, bool isPassword, bool textOnly) {
+    if (textOnly) {
+        int w = display.getWidth();
+        int boxW = w - 20;
+        // Set partial window to just the input box area (plus small margin)
+        display.setPartialWindow(10, 50, boxW, 32); 
+    } else {
+        setRefreshMode(true);
+    }
+
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         int w = display.getWidth();
         int h = display.getHeight();
         
-        // Title
-        display.fillRect(0, 0, w, 24, GxEPD_BLACK);
-        u8g2.setForegroundColor(GxEPD_WHITE);
-        u8g2.setBackgroundColor(GxEPD_BLACK);
-        u8g2.setFont(u8g2_font_helvB12_tr);
-        u8g2.setCursor(5, 18);
-        u8g2.print(title);
+        if (!textOnly) {
+            // Title
+            display.fillRect(0, 0, w, 24, GxEPD_BLACK);
+            u8g2.setForegroundColor(GxEPD_WHITE);
+            u8g2.setBackgroundColor(GxEPD_BLACK);
+            u8g2.setFont(u8g2_font_helvB12_tr);
+            u8g2.setCursor(5, 18);
+            u8g2.print(title);
+    
+            // Footer
+            int footerH = 16;
+            display.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
+            u8g2.setForegroundColor(GxEPD_WHITE);
+            u8g2.setBackgroundColor(GxEPD_BLACK);
+            u8g2.setFont(u8g2_font_profont12_tf); 
+            u8g2.setCursor(5, h - 4);
+            u8g2.print("Type: Keys | Enter: OK | Esc: Cancel");
+        }
         
-        // Input Box
+        // Input Box - Always drawn
         u8g2.setForegroundColor(GxEPD_BLACK);
         u8g2.setBackgroundColor(GxEPD_WHITE);
         int boxW = w - 20;
+        
+        // Clear box area
         display.fillRect(10, 50, boxW, 30, GxEPD_WHITE);
+        
         // Draw border
         display.fillRect(10, 50, boxW, 2, GxEPD_BLACK);
         display.fillRect(10, 80, boxW, 2, GxEPD_BLACK);
@@ -347,15 +369,6 @@ void UIManager::drawInputScreen(const String& title, const String& currentText, 
         
         u8g2.print(displayStr);
         u8g2.print("_"); 
-    
-        // Footer
-        int footerH = 16;
-        display.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
-        u8g2.setForegroundColor(GxEPD_WHITE);
-        u8g2.setBackgroundColor(GxEPD_BLACK);
-        u8g2.setFont(u8g2_font_profont12_tf); 
-        u8g2.setCursor(5, h - 4);
-        u8g2.print("Type: Keys | Enter: OK | Esc: Cancel");
     });
 }
 

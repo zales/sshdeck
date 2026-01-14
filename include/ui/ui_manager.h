@@ -33,7 +33,7 @@ public:
     
     // Generic
     void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex);
-    void drawInputScreen(const String& title, const String& currentText, bool isPassword = false);
+    void drawInputScreen(const String& title, const String& currentText, bool isPassword = false, bool textOnly = false);
     void drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected);
     void drawHelpScreen();
 

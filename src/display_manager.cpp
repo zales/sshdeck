@@ -58,6 +58,10 @@ void DisplayManager::setRefreshMode(bool partial) {
     }
 }
 
+void DisplayManager::setPartialWindow(int x, int y, int w, int h) {
+    display.setPartialWindow(x, y, w, h);
+}
+
 void DisplayManager::firstPage() {
     display.firstPage();
 }

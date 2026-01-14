@@ -293,25 +293,18 @@ void WifiManager::scanAndSelect() {
     // Use UIManager
     ui.drawScanningScreen(power.getPercentage(), power.isCharging());
     
-    // Async Scan
-    WiFi.scanNetworks(true);
-    
-    int n = -1;
-    while (true) {
-        n = WiFi.scanComplete();
-        if (n >= 0) break; // Finished
-        if (n == -2) break; // Failed (WIFI_SCAN_FAILED)
-        
-        // Cancellation
-        if (keyboard.available()) {
-            char c = keyboard.getKeyChar();
-            if (c == 0x1B || c == 'q') {
-                 WiFi.scanDelete(); // Cancel/Clean
-                 return;
-            }
-        }
-        delay(100);
-    }
+    // Ensure separate station mode logic
+    // Set mode to STA to enable scanning (defaults to OFF or NULL on boot)
+    WiFi.mode(WIFI_STA);
+    // Explicitly disconnect to ensure radio is dedicated to scanning
+    WiFi.disconnect(); 
+    delay(100);
+
+    Serial.println("Starting WiFi Scan (Blocking)...");
+
+    // Blocking Scan for reliability
+    int n = WiFi.scanNetworks();
+    Serial.printf("Scan done. Found %d networks\n", n);
     
     if (n <= 0) {
         MenuSystem menu(ui);

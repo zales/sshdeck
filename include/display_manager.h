@@ -21,6 +21,7 @@ public:
 
     // Refresh control
     void setRefreshMode(bool partial);
+    void setPartialWindow(int x, int y, int w, int h);
     void firstPage();
     bool nextPage();
     

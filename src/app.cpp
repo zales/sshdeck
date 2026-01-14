@@ -8,6 +8,17 @@ App::App()
     : wifi(terminal, keyboard, ui, power), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0) {
 }
 
+App::~App() {
+    if (sshClient) {
+        delete sshClient;
+        sshClient = nullptr;
+    }
+    if (menu) {
+        delete menu;
+        menu = nullptr;
+    }
+}
+
 void App::setup() {
     initializeHardware();
     
@@ -115,6 +126,12 @@ void App::loop() {
     }
 
     if (currentState == STATE_MENU) {
+        if (!menu) {
+            Serial.println("FATAL: menu is NULL in STATE_MENU!");
+            ESP.restart();
+            return;
+        }
+        
         if (!menu->isRunning()) {
             handleMainMenu();
         }
@@ -132,7 +149,7 @@ void App::loop() {
             sshClient->process();
             
             // Forward input to SSH client
-            if (event.type == EVENT_KEY_PRESS && event.key != 0) {
+            if (sshClient && event.type == EVENT_KEY_PRESS && event.key != 0) {
                 sshClient->write(event.key);
             }
             
@@ -318,8 +335,18 @@ void App::showHelpScreen() {
 void App::connectToServer(const String& host, int port, const String& user, const String& pass, const String& name) {
     terminal.clear();
     terminal.appendString(("Connecting to " + name + "...\n").c_str());
-    if (sshClient) delete sshClient;
+    
+    // Safe cleanup of existing connection
+    if (sshClient) {
+        delete sshClient;
+        sshClient = nullptr;
+    }
+    
     sshClient = new SSHClient(terminal, keyboard);
+    if (!sshClient) {
+        terminal.appendString("ERROR: Failed to allocate SSH client\n");
+        return;
+    }
     // Use lambdas for callbacks
     sshClient->setRefreshCallback([this]() { this->drawTerminalScreen(); });
     sshClient->setHelpCallback([this]() { this->showHelpScreen(); });

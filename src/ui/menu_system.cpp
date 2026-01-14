@@ -32,13 +32,13 @@ void MenuSystem::showMessage(const String& title, const String& msg) {
     draw();
 }
 
-void MenuSystem::draw() {
+void MenuSystem::draw(bool partial) {
     switch (state) {
         case MENU_LIST:
             ui.drawMenu(config.title, config.items, config.selected);
             break;
         case MENU_INPUT:
-            ui.drawInputScreen(config.title, config.inputText, config.isPassword);
+            ui.drawInputScreen(config.title, config.inputText, config.isPassword, partial);
             break;
         case MENU_MESSAGE:
             ui.drawMessage(config.title, config.message);
@@ -101,12 +101,12 @@ bool MenuSystem::handleInput(InputEvent e) {
         } else if (c == 0x08) { // Backspace
             if (config.inputText.length() > 0) {
                 config.inputText.remove(config.inputText.length() - 1);
-                draw();
+                draw(true); // Partial text update
                 return true;
             }
         } else if (c >= 32 && c <= 126) {
             config.inputText += c;
-            draw();
+            draw(true); // Partial text update
             return true;
         }
     }

@@ -32,7 +32,7 @@ public:
     // The Loop methods
     // Returns true if state changed or redraw needed
     bool handleInput(InputEvent e); 
-    void draw(); 
+    void draw(bool partial = false); 
 
     // Result getters
     bool isRunning() const { return state != MENU_IDLE; }
