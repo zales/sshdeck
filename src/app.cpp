@@ -5,7 +5,7 @@
 #include "board_def.h"
 
 App::App() 
-    : wifi(terminal, keyboard, ui, power), ui(display), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0) {
+    : wifi(terminal, keyboard, ui, power), ui(display), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0), refreshPending(false) {
 }
 
 App::~App() {
@@ -20,7 +20,7 @@ void App::setup() {
 
     // Setup WiFi (Scan or Connect)
     wifi.setSecurityManager(&security);
-    wifi.setRenderCallback([this]() { this->drawTerminalScreen(); });
+    wifi.setRenderCallback([this]() { this->requestRefresh(); });
     wifi.connect(); 
     
     ota.begin();
@@ -104,6 +104,12 @@ InputEvent App::pollInputs() {
 
 void App::loop() {
     ota.loop();
+    
+    // Process pending refresh requests (debounced)
+    if (refreshPending) {
+        refreshPending = false;
+        drawTerminalScreen();
+    }
     
     // Status update logic
     static unsigned long lastStatusUpdate = 0;
@@ -291,29 +297,41 @@ void App::checkSystemInput() {
     }
 }
 
-void App::drawTerminalScreen() {
-    // Construct Title for status bar
-    String title = "";
-    if (WiFi.status() == WL_CONNECTED) {
-        title = WiFi.SSID();
-        if (title.length() > 8) title = title.substring(0, 8);
-    } else {
-        title = "Offline";
-    }
-    
-    if (sshClient && sshClient->isConnected()) {
-        title += " > ";
-        String host = sshClient->getConnectedHost();
-        if (host.length() > 10) host = host.substring(0, 10);
-        title += host;
-    }
+void App::requestRefresh() {
+    refreshPending = true;
+}
 
-    ui.drawTerminal(terminal, title, power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
-    terminal.clearUpdateFlag();
+void App::drawTerminalScreen() {
+    // Thread-safe display update with mutex
+    if (displayMutex && xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100))) {
+        // Construct Title for status bar
+        String title = "";
+        if (WiFi.status() == WL_CONNECTED) {
+            title = WiFi.SSID();
+            if (title.length() > 8) title = title.substring(0, 8);
+        } else {
+            title = "Offline";
+        }
+        
+        if (sshClient && sshClient->isConnected()) {
+            title += " > ";
+            String host = sshClient->getConnectedHost();
+            if (host.length() > 10) host = host.substring(0, 10);
+            title += host;
+        }
+
+        ui.drawTerminal(terminal, title, power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
+        terminal.clearUpdateFlag();
+        
+        xSemaphoreGive(displayMutex);
+    }
 }
 
 void App::showHelpScreen() {
-    ui.drawHelpScreen();
+    if (displayMutex && xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100))) {
+        ui.drawHelpScreen();
+        xSemaphoreGive(displayMutex);
+    }
     
     while(true) {
         if(keyboard.isKeyPressed()) {
@@ -337,7 +355,7 @@ void App::connectToServer(const String& host, int port, const String& user, cons
         return;
     }
     // Use lambdas for callbacks
-    sshClient->setRefreshCallback([this]() { this->drawTerminalScreen(); });
+    sshClient->setRefreshCallback([this]() { this->requestRefresh(); });
     sshClient->setHelpCallback([this]() { this->showHelpScreen(); });
 
     if (WiFi.status() != WL_CONNECTED) {

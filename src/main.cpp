@@ -5,11 +5,15 @@
 // Define Global I2C Mutex
 SemaphoreHandle_t i2cMutex = NULL;
 
+// Define Global Display Mutex
+SemaphoreHandle_t displayMutex = NULL;
+
 // The main application instance
 App app;
 
 void setup() {
     i2cMutex = xSemaphoreCreateMutex();
+    displayMutex = xSemaphoreCreateMutex();
     app.setup();
 }
 

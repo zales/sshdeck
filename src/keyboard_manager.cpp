@@ -113,9 +113,11 @@ bool KeyboardManager::initializeKeypad() {
 
         // Bus Recovery attempt if init failed
         if (retry < KEYBOARD_INIT_RETRIES - 1) {
+             if (i2cMutex) xSemaphoreTake(i2cMutex, portMAX_DELAY);
              Wire.end();
              delay(10);
              Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL, 100000);
+             if (i2cMutex) xSemaphoreGive(i2cMutex);
              delay(20);
         }
         

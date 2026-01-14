@@ -48,12 +48,14 @@ private:
     AppState currentState;
     unsigned long lastAniUpdate;
     unsigned long lastScreenRefresh;
+    volatile bool refreshPending;
 
     // Helper Methods
     void initializeHardware();
     void enterDeepSleep();
     void checkSystemInput();
     void unlockSystem();
+    void requestRefresh(); // Thread-safe refresh request
 
     // Event Loop Logic
     InputEvent pollInputs();
