@@ -4,8 +4,8 @@
 #include <functional>
 #include <algorithm> // For std::sort
 
-WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp, PowerManager& pwr)
-    : terminal(term), keyboard(kb), display(disp), power(pwr), security(nullptr) {
+WifiManager::WifiManager(TerminalEmulator& term, KeyboardManager& kb, UIManager& ui_mgr, PowerManager& pwr)
+    : terminal(term), keyboard(kb), ui(ui_mgr), power(pwr), security(nullptr) {
 }
 
 void WifiManager::setSecurityManager(SecurityManager* sec) {
@@ -111,7 +111,7 @@ void WifiManager::refreshScreen() {
 
 // Helper to enter text using the MenuSystem's UI style
 String WifiManager::readInput(const String& prompt, bool passwordMask) {
-    UIManager ui(display);
+    
     ui.updateStatusState(power.getPercentage(), power.isCharging(), WiFi.status() == WL_CONNECTED);
     MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
@@ -124,7 +124,7 @@ String WifiManager::readInput(const String& prompt, bool passwordMask) {
 
 bool WifiManager::connect() {
     loadCredentials();
-    UIManager ui(display);
+    
     MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
 
@@ -236,52 +236,86 @@ bool WifiManager::connect() {
 }
 
 bool WifiManager::tryConnect(const String& ssid, const String& pass) {
-    UIManager ui(display);
+    
     // Use UIManager
     ui.drawConnectingScreen(ssid, pass, power.getPercentage(), power.isCharging());
     
-    // Set Hostname before connecting (must be done before WiFi.begin() or mode() in some versions, 
-    // but safe to do here)
+    // Set Hostname before connecting
     WiFi.setHostname("ssh-deck");
     WiFi.begin(ssid.c_str(), pass.c_str());
     
     unsigned long start = millis();
+    bool cancelled = false;
+
     while (WiFi.status() != WL_CONNECTED) {
-        if (millis() - start > 10000) { // 10s timeout
+        if (millis() - start > 15000) { // 15s timeout
              return false;
         }
-        delay(500);
+        
+        // Allow cancellation
+        if (keyboard.available()) {
+            char c = keyboard.getKeyChar();
+            if (c == 0x1B || c == 'q') {
+                WiFi.disconnect();
+                cancelled = true;
+                break;
+            }
+        }
+        delay(100);
     }
     
+    if (cancelled) return false;
+
     // Sync time for SSL verification
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     Serial.println("Waiting for NTP time sync: ");
+    
     time_t nowSecs = time(nullptr);
-    // Wait up to 15s for time
     start = millis();
-    while (nowSecs < 8 * 3600 * 2 && millis() - start < 15000) {
+    
+    // Wait up to 10s for time
+    while (nowSecs < 8 * 3600 * 2 && millis() - start < 10000) {
         delay(500);
         Serial.print(".");
         nowSecs = time(nullptr);
+        
+        // Allow skip
+        if (keyboard.available()) {
+            char c = keyboard.getKeyChar();
+            if (c > 0) break; // Any key skips time sync wait
+        }
     }
     Serial.println();
-    struct tm timeinfo;
-    gmtime_r(&nowSecs, &timeinfo);
-    Serial.print("Current time: ");
-    Serial.println(asctime(&timeinfo));
     
     return true;
 }
 
 void WifiManager::scanAndSelect() {
-    UIManager ui(display);
     
     // Use UIManager
     ui.drawScanningScreen(power.getPercentage(), power.isCharging());
     
-    int n = WiFi.scanNetworks();
+    // Async Scan
+    WiFi.scanNetworks(true);
     
-    if (n == 0) {
+    int n = -1;
+    while (true) {
+        n = WiFi.scanComplete();
+        if (n >= 0) break; // Finished
+        if (n == -2) break; // Failed (WIFI_SCAN_FAILED)
+        
+        // Cancellation
+        if (keyboard.available()) {
+            char c = keyboard.getKeyChar();
+            if (c == 0x1B || c == 'q') {
+                 WiFi.scanDelete(); // Cancel/Clean
+                 return;
+            }
+        }
+        delay(100);
+    }
+    
+    if (n <= 0) {
         MenuSystem menu(ui, keyboard);
         menu.drawMessage("Scan Results", "No Networks Found");
         return; 
@@ -409,7 +443,7 @@ void WifiManager::deleteCredential(int index) {
 
 void WifiManager::manage() {
     loadCredentials();
-    UIManager ui(display);
+    
     MenuSystem menu(ui, keyboard);
     menu.setIdleCallback(idleCallback);
     

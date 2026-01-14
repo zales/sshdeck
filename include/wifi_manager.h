@@ -6,13 +6,13 @@
 #include "security_manager.h"
 #include "terminal_emulator.h"
 #include "keyboard_manager.h"
-#include "display_manager.h"
+#include "ui/ui_manager.h"
 #include "power_manager.h"
 #include <functional>
 
 class WifiManager {
 public:
-    WifiManager(TerminalEmulator& term, KeyboardManager& kb, DisplayManager& disp, PowerManager& pwr);
+    WifiManager(TerminalEmulator& term, KeyboardManager& kb, UIManager& ui, PowerManager& pwr);
     
     void setSecurityManager(SecurityManager* sec);
     
@@ -35,7 +35,7 @@ private:
     
     TerminalEmulator& terminal;
     KeyboardManager& keyboard;
-    DisplayManager& display;
+    UIManager& ui;
     PowerManager& power;
     Preferences preferences;
     SecurityManager* security;

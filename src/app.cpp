@@ -5,7 +5,7 @@
 #include "board_def.h"
 
 App::App() 
-    : wifi(terminal, keyboard, display, power), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0) {
+    : wifi(terminal, keyboard, ui, power), ui(display), menu(nullptr), sshClient(nullptr), ota(display), currentState(STATE_MENU), lastAniUpdate(0), lastScreenRefresh(0) {
 }
 
 void App::setup() {
