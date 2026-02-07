@@ -31,7 +31,7 @@
 
 // Update Server
 #ifndef APP_VERSION
-#define APP_VERSION        "0.2.0"
+#define APP_VERSION        "1.0.0"
 #endif
 #define UPDATE_SERVER_URL  "https://zales.github.io/sshdeck/firmware.bin"
 // Leave empty to skip verification (INSECURE), or paste Root CA PEM to verify server

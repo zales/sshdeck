@@ -303,7 +303,7 @@ void SettingsController::handleSystemUpdate() {
                  String targetVer = (*versions)[selected].version;
                  
                  std::vector<String> confirmOpts = {"Yes, Flash it", "No"};
-                 _system.menu()->showMenu("Flash v" + targetVer + "?", confirmOpts, [this, targetUrl](int c){
+                 _system.menu()->showMenu("Flash " + targetVer + "?", confirmOpts, [this, targetUrl](int c){
                      if(c==0) {
                          _system.ota().updateFromUrl(targetUrl, UPDATE_ROOT_CA);
                          // if update fails
