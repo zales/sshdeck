@@ -167,6 +167,7 @@ bool WifiManager::connectTo(const String& ssid, const String& pass) {
     WiFi.disconnect();
     WiFi.mode(WIFI_STA);
     WiFi.setHostname("ssh-deck");
+    WiFi.setSleep(WIFI_PS_MIN_MODEM);
     
     WiFi.begin(ssid.c_str(), pass.c_str());
     
@@ -239,6 +240,10 @@ void WifiManager::connectAsync() {
              WiFi.mode(WIFI_STA);
              WiFi.setHostname("ssh-deck");
              WiFi.setAutoReconnect(true);
+             // Enable WiFi Light Sleep: the modem powers down between DTIM beacons,
+             // saving ~80mA in idle. Latency increases slightly (~100-300ms) but
+             // that's imperceptible for an SSH terminal.
+             WiFi.setSleep(WIFI_PS_MIN_MODEM);
              WiFi.begin(ssid.c_str(), pass.c_str());
              _lastStatus = WL_DISCONNECTED; // Reset status tracker
         }

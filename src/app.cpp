@@ -71,7 +71,20 @@ void App::initializeHardware() {
     pinMode(BOARD_LORA_CS, OUTPUT);
     digitalWrite(BOARD_LORA_CS, HIGH);
     
+    // Put LoRa SX1262 into sleep mode to save ~600µA.
+    // Send SetSleep(0x00) command: sleep with cold start (lowest power).
+    SPI.begin(BOARD_SPI_SCK, BOARD_SPI_MISO, BOARD_SPI_MOSI);
+    digitalWrite(BOARD_LORA_CS, LOW);
+    SPI.transfer(0x84); // SetSleep opcode
+    SPI.transfer(0x00); // Cold start (RC oscillator off)
+    digitalWrite(BOARD_LORA_CS, HIGH);
+    
     delay(1500); // Stabilization
+    
+    // Reduce CPU frequency from 240MHz to 80MHz to save ~30-40mA.
+    // SSH crypto is handled by LibSSH in a separate task and remains fast enough.
+    // E-ink SPI is also well within 80MHz capability.
+    setCpuFrequencyMhz(80);
     
     // Initialize I2C and Fuel Gauge
     Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL, 100000); // Force 100kHz
@@ -97,7 +110,8 @@ void App::initializeHardware() {
 }
 
 InputEvent App::pollInputs() {
-    _keyboard.loop();
+    // Note: keyboard.loop() for power button is already called in App::loop(),
+    // no need to call it again here. Just check for queued key events.
     if (_keyboard.getSystemEvent() == SYS_EVENT_SLEEP) {
         return InputEvent(EVENT_SYSTEM, SYS_EVENT_SLEEP);
     }
@@ -129,9 +143,6 @@ void App::loop() {
     
     // Always poll the power button, regardless of keyboard queue state.
     // keyboard.loop() reads the BOOT_PIN GPIO to detect held-down power button.
-    // Previously this only ran inside pollInputs(), which was gated behind
-    // keyboard.available() > 0 — so the power button was ignored unless
-    // a key was simultaneously pressed on the keyboard.
     _keyboard.loop();
     if (_keyboard.getSystemEvent() == SYS_EVENT_SLEEP) {
         enterDeepSleep();
@@ -146,9 +157,12 @@ void App::loop() {
         }
     }
     
-    // Status update logic
+    // Battery status update: read I2C only every 5 seconds instead of every 1s.
+    // BQ27220 updates its registers at ~1Hz internally, but for a status bar
+    // percentage display, 5s granularity is more than sufficient.
+    // This saves ~8 I2C transactions per 5s window (was 10, now 2).
     static unsigned long lastStatusUpdate = 0;
-    if (millis() - lastStatusUpdate > 1000) {
+    if (millis() - lastStatusUpdate > 5000) {
         _ui.updateStatusState(_power.getPercentage(), _power.isCharging(), WiFi.status() == WL_CONNECTED);
         lastStatusUpdate = millis();
     }

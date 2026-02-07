@@ -54,6 +54,10 @@ void AppLockedState::update(App& app) {
         } else if (changed) {
             redraw(app);
         }
+    } else {
+        // No input: sleep to save CPU power while waiting for PIN entry.
+        // Keyboard events are hardware-buffered, so no input is lost.
+        delay(50);
     }
 }
 

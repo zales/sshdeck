@@ -52,6 +52,13 @@ void AppMenuState::update(App& app) {
         app.menu()->draw();
         app.display().unlock();
     }
+    
+    // Sleep when idle: menu state is mostly waiting for user input.
+    // 50ms delay saves significant CPU power while keeping UI responsive
+    // (keyboard events are buffered by TCA8418 hardware + FreeRTOS queue).
+    if (!app.keyboard().available()) {
+        delay(50);
+    }
 }
 
 void AppMenuState::onRefresh(App& app) {

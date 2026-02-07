@@ -108,7 +108,7 @@ void AppTerminalState::update(App& app) {
         app.changeState(new AppMenuState());
     }
     
-    delay(5); // Small yield
+    delay(10); // Yield to FreeRTOS scheduler, saves CPU power in idle
 }
 
 void AppTerminalState::onRefresh(App& app) {
