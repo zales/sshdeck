@@ -60,6 +60,9 @@ float PowerManager::getVoltage() {
 int PowerManager::getPercentage() {
     if (BOARD_BAT_ADC < 0) {
          uint16_t soc = readFuelGauge16(BQ27220_REG_SOC);
+         // Clamp to 0-100: BQ27220 can return >100 during calibration,
+         // or 0xFFFF on I2C failure
+         if (soc > 100) soc = 100;
          return (int)soc;
     }
     return 0;
@@ -118,12 +121,13 @@ BatteryStatus PowerManager::getStatus() {
 
     s.vbusGood = (vbus >> 7) & 0x01;
     
-    uint8_t vbusStat = (stat >> 6) & 0x03;
+    uint8_t vbusStat = (stat >> 5) & 0x07; // VBUS_STAT is bits [7:5] (3 bits)
     if (vbusStat == 0) s.powerSource = "Battery";
-    else if (vbusStat == 1) s.powerSource = "USB Host";
-    else if (vbusStat == 2) s.powerSource = "Adapter";
-    else if (vbusStat == 3) s.powerSource = "OTG";
-    else s.powerSource = "Unknown";
+    else if (vbusStat == 1) s.powerSource = "USB SDP";
+    else if (vbusStat == 2) s.powerSource = "USB CDP";
+    else if (vbusStat == 3) s.powerSource = "DCP Adapter";
+    else if (vbusStat == 7) s.powerSource = "OTG";
+    else s.powerSource = "Adapter";
     
     return s;
 }

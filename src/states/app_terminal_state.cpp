@@ -46,8 +46,12 @@ void AppTerminalState::update(App& app) {
          auto state = app.sshClient()->getState();
          
          if (state == SSHClient::CONNECTING) {
-             // Just redraw terminal to see logs
-             app.drawTerminalScreen();
+             // Throttle redraws during connection — partial refresh takes ~700ms,
+             // so refreshing every 50ms is wasteful. Use 1s interval.
+             if (millis() - _lastDisplayUpdate >= 1000) {
+                 _lastDisplayUpdate = millis();
+                 app.drawTerminalScreen();
+             }
              delay(50);
              return;
          }
@@ -71,7 +75,21 @@ void AppTerminalState::update(App& app) {
             }
 
             if (app.terminal().needsUpdate() || forceRedraw) {
-                 app.drawTerminalScreen();
+                 // Debounce: don't refresh faster than DISPLAY_UPDATE_INTERVAL_MS
+                 // E-ink partial refresh takes ~700ms, rapid redraws are wasteful
+                 if (millis() - _lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL_MS) {
+                     _lastDisplayUpdate = millis();
+                     _partialRefreshCount++;
+                     
+                     // Periodic full refresh to combat ghosting accumulation
+                     // Every 50 partial updates, force a full refresh cycle
+                     if (_partialRefreshCount >= 50) {
+                         _partialRefreshCount = 0;
+                         app.drawTerminalScreen(false); // full refresh
+                     } else {
+                         app.drawTerminalScreen();
+                     }
+                 }
             }
 
             if (!app.sshClient()->isConnected()) {

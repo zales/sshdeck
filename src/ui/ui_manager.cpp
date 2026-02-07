@@ -29,7 +29,7 @@ void UIManager::drawTitleBar(const String& title) {
 }
 
 void UIManager::drawPinEntry(const String& title, const String& subtitle, const String& entry, bool isWrong) {
-    display.setRefreshMode(true); // Ensure partial update mode
+    display.setRefreshMode(true); // Partial refresh for responsive PIN typing
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         drawHeader(title);
 
@@ -98,7 +98,7 @@ void UIManager::drawMessage(const String& title, const String& message, bool par
 }
 
 void UIManager::drawSystemInfo(const String& ip, const String& bat, const String& ram, const String& mac) {
-    setRefreshMode(true); // Partial refresh for consistency
+    setRefreshMode(true); // Partial refresh
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         UILayout layout(*this, "System Info");
         
@@ -271,12 +271,31 @@ void UIManager::drawConnectingScreen(const String& ssid, const String& password,
     });
 }
 
-void UIManager::drawMenu(const String& title, const std::vector<String>& items, int selectedIndex) {
-    setRefreshMode(true); // Partial usually for menu nav
+void UIManager::drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, bool navOnly) {
+    
+    const int itemsStartY = 32;
+    
+    if (navOnly) {
+        // Navigation only: restrict partial window to items area, excluding the header.
+        // This prevents the black header bar from fading due to repeated partial refreshes —
+        // e-ink partial waveforms don't fully drive particles, so repeated partials weaken contrast.
+        display.setPartialWindow(0, itemsStartY, display.getWidth(), display.getHeight() - itemsStartY);
+    } else {
+        // Initial draw or sub-menu transition: full-screen partial refresh.
+        // After fullClean() in state enter, the controller is properly reset and partial
+        // refresh works correctly on a clean white canvas. Using partial here (vs full)
+        // is faster (~700ms vs ~1100ms) and the header renders with good contrast
+        // because the old→new transition is white→black (maximum drive).
+        setRefreshMode(true);
+    }
+    
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         int w = display.getWidth();
         int h = display.getHeight();
         
+        // Always draw header into buffer (GxEPD2 firstPage clears buffer to white).
+        // When navOnly=true with partial window below header, the header drawing goes
+        // into the buffer but is clipped out by the display driver — no e-ink refresh occurs.
         drawHeader(title);
         
         u8g2.setForegroundColor(GxEPD_BLACK);
@@ -401,61 +420,75 @@ T clamp(T val, T min, T max) {
     return val;
 }
 
+bool UIManager::_headerContentChanged(const String& title, int bat, bool charging, bool wifi) {
+    if (title != _lastHeaderTitle || bat != _lastHeaderBat ||
+        charging != _lastHeaderCharging || wifi != _lastHeaderWifi) {
+        _lastHeaderTitle = title;
+        _lastHeaderBat = bat;
+        _lastHeaderCharging = charging;
+        _lastHeaderWifi = wifi;
+        return true;
+    }
+    return false;
+}
+
 void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected, bool partial) {
     
-    // Partial Refresh Logic
-    // If partial mode is requested, we try to limit the refresh window to only dirty rows.
-    // This maintains display performance while ensuring correctness (persisting the rest of the screen).
+    // Geometry constants
+    const int headerH = 16;  // Height of status bar
+    const int termYStart = 24;
+    const int termLineH = 10;
+    const int termCharW = 6;
     
     int winX = 0;
     int winY = 0;
     int winW = display.getWidth();
     int winH = display.getHeight();
     
-    // Terminal geometry constants
-    const int termYStart = 24;
-    const int termLineH = 10;
-    const int termCharW = 6;
-    
     if (partial) {
-        int startRow, endRow;
-        if (term.getDirtyRange(startRow, endRow)) {
-            // Calculate pixel window
-            // Include a small margin/padding to cover cursor artifacts or line spacing
-            int y1 = termYStart + (startRow * termLineH) - 8; // Top of the first dirty line
-            int y2 = termYStart + (endRow * termLineH) + termLineH; // Bottom of the last dirty line
-            
-            // Fix for status bar fading:
-            // If the update is near the top of the terminal (Row 0-2), extend the window 
-            // to include the Status Bar (Y=0). This ensures the status bar gets refreshed 
-            // and maintains contrast, avoiding border artifacts or fading from nearby updates.
-            if (y1 < 40) {
-                y1 = 0;
-            }
-            
-            // Bounds checking
-            y1 = clamp(y1, 0, winH);
-            y2 = clamp(y2, 0, winH);
-            
-            winY = y1;
-            winH = y2 - y1;
-            
-            // Ensure alignment for some E-Ink controllers (usually multiple of 8 for X, Y is flexible)
-            // GxEPD2 handles byte alignment internally usually, but let's be safe on height > 0
-            if (winH <= 0) winH = termLineH; 
-            
-            display.setPartialWindow(winX, winY, winW, winH);
-        } else {
-             // Nothing to draw?
-             // But maybe Status bar need update?
-             // If terminal says no dirty rows, we technically don't need to redraw terminal lines.
-             // But for safety let's just do nothing or minimal.
-             // Let's assume if drawTerminal is called, something MIGHT have changed.
-             // Fallback to full screen partial update if no specific rows dirty (e.g. status bar update only)
-             display.setRefreshMode(true);
+        int startRow = -1, endRow = -1;
+        bool termDirty = term.getDirtyRange(startRow, endRow);
+        bool headerDirty = _headerContentChanged(statusTitle, batteryPercent, isCharging, wifiConnected);
+        
+        // If absolutely nothing changed, skip the entire refresh.
+        // This saves ~700ms of blocking time and avoids any e-ink degradation.
+        if (!termDirty && !headerDirty) {
+            return;
         }
+        
+        // Calculate partial window based on what actually needs refreshing.
+        // Key principle: EXCLUDE the header from partial window when its content hasn't
+        // changed. E-ink partial LUT waveforms don't have a perfect "hold" — even
+        // unchanged black pixels receive a small voltage that degrades them over time.
+        // By only including the header when it truly changed, we prevent fading.
+        int y1, y2;
+        
+        if (termDirty && headerDirty) {
+            // Both changed — single window from header top to last dirty row
+            y1 = 0;
+            y2 = termYStart + (endRow * termLineH) + termLineH;
+        } else if (headerDirty) {
+            // Only header changed (e.g. battery % updated) — narrow header-only window
+            y1 = 0;
+            y2 = headerH;
+        } else {
+            // Only terminal content changed — window below header
+            y1 = termYStart + (startRow * termLineH) - 8;
+            y2 = termYStart + (endRow * termLineH) + termLineH;
+        }
+        
+        y1 = clamp(y1, 0, (int)display.getHeight());
+        y2 = clamp(y2, 0, (int)display.getHeight());
+        
+        winY = y1;
+        winH = y2 - y1;
+        if (winH <= 0) winH = termLineH;
+        
+        display.setPartialWindow(winX, winY, winW, winH);
     } else {
         display.setRefreshMode(false); // Full Refresh
+        // Sync header state on full refresh so future partials start from known baseline
+        _headerContentChanged(statusTitle, batteryPercent, isCharging, wifiConnected);
     }
 
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
@@ -467,7 +500,6 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
         drawStatusBar(statusTitle, wifiConnected, batteryPercent, isCharging);
 
         u8g2.setFont(u8g2_font_6x10_tf);
-        u8g2.setFontMode(1);
         
         // Terminal Content
         for (int row = 0; row < TERM_ROWS; row++) {
@@ -510,11 +542,9 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
                     
                     if (inv) {
                         display.fillRect(x, y - 8, bi * termCharW, termLineH, GxEPD_BLACK);
-                        u8g2.setFontMode(1); 
                         u8g2.setForegroundColor(GxEPD_WHITE);
                         u8g2.setBackgroundColor(GxEPD_BLACK);
                     } else {
-                        u8g2.setFontMode(1); 
                         u8g2.setForegroundColor(GxEPD_BLACK);
                         u8g2.setBackgroundColor(GxEPD_WHITE);
                     }
@@ -599,9 +629,9 @@ void UIManager::drawHelpScreen() {
 
 void UIManager::render(std::function<void(U8G2_FOR_ADAFRUIT_GFX&)> drawCallback) {
     display.firstPage();
+    // Note: firstPage() already calls fillScreen(WHITE) internally in GxEPD2,
+    // so we don't need display.clear() here — it would be a redundant memset.
     do {
-        display.clear(); // Always start with a clean slate
-        
         // Reset defaults before callback
         auto& u8g2 = display.getFonts();
         u8g2.setFontMode(1);

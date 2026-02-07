@@ -55,7 +55,7 @@ void MenuSystem::reset() {
 void MenuSystem::draw(bool partial) {
     switch (state) {
         case MENU_LIST:
-            ui.drawMenu(config.title, config.items, config.selected);
+            ui.drawMenu(config.title, config.items, config.selected, partial);
             break;
         case MENU_INPUT:
             ui.drawInputScreen(config.title, config.inputText, config.isPassword, partial);
@@ -107,7 +107,7 @@ bool MenuSystem::handleInput(InputEvent e, bool suppressDraw) {
         }
         
         if (changed) {
-            if (!suppressDraw) draw();
+            if (!suppressDraw) draw(true); // navOnly: partial window excludes header
             return true;
         }
     } 

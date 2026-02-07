@@ -32,7 +32,7 @@ public:
     void drawStatusBar(const String& title, bool wifiConnected, int batteryPercent, bool isCharging);
     
     // Generic
-    void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex);
+    void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, bool navOnly = false);
     void drawInputScreen(const String& title, const String& currentText, bool isPassword = false, bool textOnly = false);
     void drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected, bool partial = true);
     void drawHelpScreen();
@@ -67,6 +67,16 @@ private:
     int currentBat = 0;
     bool currentCharging = false;
     bool currentWifi = false;
+    
+    // Header dirty tracking: only include header in partial refresh when content changed.
+    // E-ink partial LUT doesn't have a perfect no-op — repeated partials on unchanged
+    // black areas gradually fade them. By excluding the header when unchanged, we
+    // prevent degradation entirely.
+    String _lastHeaderTitle = "";
+    int _lastHeaderBat = -1;
+    bool _lastHeaderCharging = false;
+    bool _lastHeaderWifi = false;
+    bool _headerContentChanged(const String& title, int bat, bool charging, bool wifi);
 };
 
 // UI Layout Helper for automatic positioning

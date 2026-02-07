@@ -10,4 +10,6 @@ public:
 
 private:
     unsigned long _lastAniUpdate = 0;
+    unsigned long _lastDisplayUpdate = 0;
+    unsigned int _partialRefreshCount = 0;
 };

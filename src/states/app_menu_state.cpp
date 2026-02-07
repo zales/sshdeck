@@ -2,7 +2,11 @@
 #include "app.h"
 
 void AppMenuState::enter(App& app) {
-    // Perform a Full Refresh Clear to remove ghosting from previous states (e.g. Terminal)
+    // fullClean() is ESSENTIAL: it performs a full refresh to white, which resets
+    // the UC8253 controller's internal state (both image buffers + LUT mode).
+    // Without this, the controller doesn't transition cleanly from terminal's
+    // partial refresh mode to drawing a new screen — the header appears faded
+    // and old terminal content ghosts through.
     app.display().lock();
     app.display().fullClean();
     app.display().unlock();

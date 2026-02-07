@@ -127,6 +127,17 @@ void App::loop() {
     _ota.loop();
     _wifi.loop();
     
+    // Always poll the power button, regardless of keyboard queue state.
+    // keyboard.loop() reads the BOOT_PIN GPIO to detect held-down power button.
+    // Previously this only ran inside pollInputs(), which was gated behind
+    // keyboard.available() > 0 — so the power button was ignored unless
+    // a key was simultaneously pressed on the keyboard.
+    _keyboard.loop();
+    if (_keyboard.getSystemEvent() == SYS_EVENT_SLEEP) {
+        enterDeepSleep();
+        return;
+    }
+    
     // Process pending refresh requests (debounced)
     if (_refreshPending) {
         _refreshPending = false;
