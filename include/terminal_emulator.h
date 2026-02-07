@@ -25,6 +25,10 @@ public:
     void appendString(const String& str);
     void clear();
     
+    // Thread-safe read lock (use when reading terminal state from another thread)
+    void lock();
+    void unlock();
+    
     const char* getLine(int row) const;
     const CharAttr& getAttr(int row, int col) const;
     

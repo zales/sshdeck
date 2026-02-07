@@ -32,6 +32,7 @@ public:
 private:
     bool keyValid;
     unsigned char aesKey[32]; // 256-bit key
+    unsigned char pbkdf2Salt[16]; // Per-device PBKDF2 salt
     Preferences prefs;
     
     void setKeyFromPin(const String& pin);

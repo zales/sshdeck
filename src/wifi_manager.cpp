@@ -213,7 +213,8 @@ void WifiManager::deleteCredential(int index) {
     for (int i = index; i < maxSavedIndex - 1; i++) {
         savedNetworks[i] = savedNetworks[i+1];
         preferences.putString(("ssid" + String(i)).c_str(), savedNetworks[i].ssid);
-        preferences.putString(("pass" + String(i)).c_str(), savedNetworks[i].pass);
+        String storePass = security ? security->encrypt(savedNetworks[i].pass) : savedNetworks[i].pass;
+        preferences.putString(("pass" + String(i)).c_str(), storePass.c_str());
     }
     
     maxSavedIndex--;

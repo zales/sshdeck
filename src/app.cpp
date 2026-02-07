@@ -8,7 +8,7 @@
 #include "states/app_locked_state.h"
 
 App::App() 
-    : _wifi(_terminal, _keyboard, _ui, _power), _ui(_display), _ota(_display), _currentState(nullptr), _nextState(nullptr), _lastAniUpdate(0), _lastScreenRefresh(0), _refreshPending(false) {
+    : _ui(_display), _wifi(_terminal, _keyboard, _ui, _power), _ota(_display), _currentState(nullptr), _nextState(nullptr), _lastAniUpdate(0), _lastScreenRefresh(0), _refreshPending(false) {
     _settingsController.reset(new SettingsController(*this));
     _connectionController.reset(new ConnectionController(*this));
 }
@@ -207,6 +207,7 @@ void App::requestRefresh() {
 void App::drawTerminalScreen(bool partial) {
     // Thread-safe display update with mutex
     _display.lock();
+    _terminal.lock();
     
     // Construct Title for status bar
     String title = "";
@@ -227,6 +228,7 @@ void App::drawTerminalScreen(bool partial) {
     _ui.drawTerminal(_terminal, title, _power.getPercentage(), _power.isCharging(), WiFi.status() == WL_CONNECTED, partial);
     _terminal.clearUpdateFlag();
     
+    _terminal.unlock();
     _display.unlock();
 }
 

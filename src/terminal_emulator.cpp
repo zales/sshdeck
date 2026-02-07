@@ -176,6 +176,14 @@ void TerminalEmulator::clear() {
     need_display_update = true;
 }
 
+void TerminalEmulator::lock() {
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+}
+
+void TerminalEmulator::unlock() {
+    xSemaphoreGive(_mutex);
+}
+
 const char* TerminalEmulator::getLine(int row) const {
     return term_lines[row];
 }

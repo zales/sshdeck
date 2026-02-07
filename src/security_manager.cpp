@@ -4,8 +4,8 @@
 #include <mbedtls/pkcs5.h>
 #include <cstring>
 
-// Salt for PBKDF2 (stored in code, in production would be per-user and stored securely)
-static const unsigned char PBKDF2_SALT[16] = { 
+// Legacy hardcoded salt for backwards compatibility with existing devices
+static const unsigned char LEGACY_PBKDF2_SALT[16] = { 
     0x5A, 0x45, 0x52, 0x4F, 0x53, 0x41, 0x4C, 0x54,
     0x44, 0x45, 0x43, 0x4B, 0x50, 0x52, 0x4F, 0x31
 };
@@ -15,10 +15,27 @@ static const int PBKDF2_ITERATIONS = 10000;
 
 SecurityManager::SecurityManager() : keyValid(false) {
     memset(aesKey, 0, sizeof(aesKey));
+    memset(pbkdf2Salt, 0, sizeof(pbkdf2Salt));
 }
 
 void SecurityManager::begin() {
     prefs.begin("tdeck-sec", false);
+    
+    // Load or generate per-device salt
+    if (prefs.isKey("salt")) {
+        prefs.getBytes("salt", pbkdf2Salt, sizeof(pbkdf2Salt));
+    } else {
+        if (!prefs.isKey("challenge")) {
+            // Fresh install - generate unique random salt
+            for (int i = 0; i < 16; i++) {
+                pbkdf2Salt[i] = (unsigned char)(esp_random() & 0xFF);
+            }
+        } else {
+            // Legacy device with existing data - use hardcoded salt for compatibility
+            memcpy(pbkdf2Salt, LEGACY_PBKDF2_SALT, 16);
+        }
+        prefs.putBytes("salt", pbkdf2Salt, sizeof(pbkdf2Salt));
+    }
 }
 
 void SecurityManager::setKeyFromPin(const String& pin) {
@@ -32,7 +49,7 @@ void SecurityManager::setKeyFromPin(const String& pin) {
     
     mbedtls_pkcs5_pbkdf2_hmac(&md_ctx,
                               (const unsigned char*)pin.c_str(), pin.length(),
-                              PBKDF2_SALT, sizeof(PBKDF2_SALT),
+                              pbkdf2Salt, sizeof(pbkdf2Salt),
                               PBKDF2_ITERATIONS,
                               32, // Output 256-bit key
                               aesKey);
@@ -193,7 +210,6 @@ String SecurityManager::decrypt(const String& cipherText) {
 
     return ""; // Invalid padding or decryption failed
 }
-#include "security_manager.h"
 
 void SecurityManager::saveSSHKey(const String& key) {
     if (key.length() == 0) {

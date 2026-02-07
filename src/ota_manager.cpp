@@ -183,7 +183,7 @@ bool OtaManager::updateFromUrl(const String& url, const String& rootCaCert) {
     WiFiClient* stream = http.getStreamPtr();
     size_t written = 0;
     size_t total = len;
-    uint8_t buff[128] = { 0 };
+    uint8_t buff[4096] = { 0 };
     
     int lastPercent = -1;
 

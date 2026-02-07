@@ -65,15 +65,8 @@ void AppTerminalState::update(App& app) {
             
             bool forceRedraw = false;
             // Battery Charging Animation (every 1 sec)
-            // Note: access to lastAniUpdate needs to be public or via getter/setter if we want to be strict,
-            // but for now we made App members public.
-            
-            // Use a static here or move battery logic to App::loop completely?
-            // Let's keep specific state logic here.
-            static unsigned long lastAniUpdate = 0;
-
-            if (app.power().isCharging() && (millis() - lastAniUpdate > 1000)) {
-                lastAniUpdate = millis();
+            if (app.power().isCharging() && (millis() - _lastAniUpdate > 1000)) {
+                _lastAniUpdate = millis();
                 forceRedraw = true;
             }
 

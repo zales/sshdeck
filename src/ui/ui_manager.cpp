@@ -492,15 +492,24 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
             display.fillRect(0, py - 8, display.getWidth(), termLineH, GxEPD_WHITE);
             
             if (line[0] != '\0') {
-                for (int col = 0; line[col] != '\0' && col < TERM_COLS; col++) {
-                    char ch = line[col];
+                int col = 0;
+                while (line[col] != '\0' && col < TERM_COLS) {
                     bool inv = term.getAttr(row, col).inverse;
+                    int startCol = col;
+                    char buf[TERM_COLS + 1];
+                    int bi = 0;
                     
-                    int x = col * termCharW;
+                    // Batch consecutive characters with the same inverse attribute
+                    while (col < TERM_COLS && line[col] != '\0' && term.getAttr(row, col).inverse == inv) {
+                        buf[bi++] = line[col++];
+                    }
+                    buf[bi] = '\0';
+                    
+                    int x = startCol * termCharW;
                     int y = py;
                     
                     if (inv) {
-                        display.fillRect(x, y - 8, termCharW, termLineH, GxEPD_BLACK);
+                        display.fillRect(x, y - 8, bi * termCharW, termLineH, GxEPD_BLACK);
                         u8g2.setFontMode(1); 
                         u8g2.setForegroundColor(GxEPD_WHITE);
                         u8g2.setBackgroundColor(GxEPD_BLACK);
@@ -510,7 +519,7 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
                         u8g2.setBackgroundColor(GxEPD_WHITE);
                     }
                     u8g2.setCursor(x, y);
-                    u8g2.print(ch);
+                    u8g2.print(buf);
                 }
             }
         }

@@ -7,4 +7,7 @@ public:
     void update(App& app) override;
     void onRefresh(App& app) override;
     void exit(App& app) override;
+
+private:
+    unsigned long _lastAniUpdate = 0;
 };

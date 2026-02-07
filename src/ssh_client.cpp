@@ -6,6 +6,7 @@
 SSHClient::SSHClient(TerminalEmulator& term, KeyboardManager& kb) 
     : terminal(term), keyboard(kb), session(nullptr), channel(nullptr), 
       _state(DISCONNECTED), last_update(0), _pendingCancel(false) {
+    _sessionMutex = xSemaphoreCreateMutex();
 }
 
 void SSHClient::setRefreshCallback(std::function<void()> callback) {
@@ -226,11 +227,26 @@ void SSHClient::connectTask(void* param) {
     }
     
     self->terminal.appendString("SSH Connected!\n\n");
+    
+    xSemaphoreTake(self->_sessionMutex, portMAX_DELAY);
+    if (self->_pendingCancel) {
+        // Race: disconnect was requested while we were finalizing
+        ssh_channel_close(channel);
+        ssh_channel_free(channel);
+        ssh_disconnect(session);
+        ssh_free(session);
+        xSemaphoreGive(self->_sessionMutex);
+        self->_taskHandle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
     self->session = session;
     self->channel = channel;
     self->connectedHost = self->_connHost;
     self->last_update = millis();
     self->_state = CONNECTED;
+    xSemaphoreGive(self->_sessionMutex);
+    
     if (self->onRefresh) self->onRefresh();
     
     self->_taskHandle = NULL;
@@ -239,10 +255,12 @@ void SSHClient::connectTask(void* param) {
 
 void SSHClient::disconnect() {
     _pendingCancel = true;
-    _state = DISCONNECTED;
 
     // Do not kill task aggressively to prevent leaks
     // The task will exit when it sees _pendingCancel
+    
+    xSemaphoreTake(_sessionMutex, portMAX_DELAY);
+    _state = DISCONNECTED;
     
     if (channel) {
         ssh_channel_close(channel);
@@ -255,8 +273,7 @@ void SSHClient::disconnect() {
         ssh_free(session);
         session = nullptr;
     }
-    
-    _state = DISCONNECTED;
+    xSemaphoreGive(_sessionMutex);
 }
 
 void SSHClient::process() {

@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <libssh/libssh.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <functional>
 #include "config.h"
 #include "terminal_emulator.h"
@@ -41,6 +43,7 @@ private:
     
     ssh_session session;
     ssh_channel channel;
+    SemaphoreHandle_t _sessionMutex;
     
     State _state = DISCONNECTED;
     String _lastError;
