@@ -40,15 +40,20 @@ SystemEvent KeyboardManager::getSystemEvent() {
 
 bool KeyboardManager::begin() {
     // Setup Backlight
-    pinMode(BOARD_KEYBOARD_LED, OUTPUT);
+    // Setup Backlight PWM: channel 1, 1kHz, 8-bit resolution
+    // Channel 0 is used by haptic motor, so we use channel 1 for backlight.
+    ledcSetup(1, 1000, 8);
+    ledcAttachPin(BOARD_KEYBOARD_LED, 1);
     
-    // Restore Backlight Preference
+    // Restore saved brightness level (0-3)
     Preferences prefs;
     prefs.begin("tdeck", true); // Read-only
-    bool bl = prefs.getBool("backlight", false); // Default Off
+    _backlightLevel = prefs.getUChar("bl_level", 0); // Default Off
+    if (_backlightLevel > 3) _backlightLevel = 0;
     prefs.end();
     
-    digitalWrite(BOARD_KEYBOARD_LED, bl ? HIGH : LOW);
+    // Apply saved level
+    setBacklightLevel(_backlightLevel);
 
     // Setup Vibration (PWM)
     ledcSetup(0, 2000, 8); // Channel 0, 2kHz, 8-bit
@@ -289,19 +294,29 @@ void KeyboardManager::hapticTask(void* parameter) {
     }
 }
 
-void KeyboardManager::setBacklight(bool on) {
-    digitalWrite(BOARD_KEYBOARD_LED, on ? HIGH : LOW);
+// PWM duty cycle values for each level (8-bit: 0-255)
+// Level 0: Off, Level 1: ~12% (low), Level 2: ~30% (medium), Level 3: ~100% (high)
+static const uint8_t BL_PWM_VALUES[] = { 0, 30, 76, 255 };
+
+void KeyboardManager::setBacklightLevel(uint8_t level) {
+    if (level > 3) level = 0;
+    _backlightLevel = level;
+    ledcWrite(1, BL_PWM_VALUES[level]);
     
-    // Save Preference
+    // Save preference
     Preferences prefs;
     prefs.begin("tdeck", false); // Read-write
-    prefs.putBool("backlight", on);
+    prefs.putUChar("bl_level", level);
     prefs.end();
 }
 
+void KeyboardManager::setBacklight(bool on) {
+    setBacklightLevel(on ? 3 : 0);
+}
+
 void KeyboardManager::toggleBacklight() {
-    int state = digitalRead(BOARD_KEYBOARD_LED);
-    setBacklight(state == LOW);
+    // Cycle: Off(0) -> Low(1) -> Medium(2) -> High(3) -> Off(0)
+    setBacklightLevel((_backlightLevel + 1) % 4);
 }
 
 void KeyboardManager::clearBuffer(unsigned long durationMs) {

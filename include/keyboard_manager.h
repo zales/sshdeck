@@ -37,12 +37,15 @@ public:
     unsigned long getMicPressTime() const { return mic_press_time; }
     
     void toggleBacklight();
-    void setBacklight(bool on);
+    void setBacklight(bool on); // Legacy: sets max or off
+    void setBacklightLevel(uint8_t level); // 0=off, 1=low, 2=med, 3=high
+    uint8_t getBacklightLevel() const { return _backlightLevel; }
 
 private:
     Adafruit_TCA8418 keypad;
     QueueHandle_t hapticQueue;
     QueueHandle_t inputQueue;
+    uint8_t _backlightLevel = 0; // 0=off, 1=low, 2=med, 3=high
     TaskHandle_t inputTaskHandle;
     
     // State

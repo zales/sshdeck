@@ -6,8 +6,16 @@ AppLockedState::AppLockedState() : _pin("") {
 }
 
 void AppLockedState::enter(App& app) {
-    app.display().setRefreshMode(true); // Enable fast refresh for typing
-    redraw(app);
+    // Full refresh clear to establish clean header baseline.
+    app.display().lock();
+    app.display().fullClean();
+    app.display().unlock();
+    
+    // Draw the complete PIN entry screen (header + box) with full refresh.
+    // Subsequent redraws (PIN typing) use partial window below header.
+    app.display().lock();
+    app.ui().drawPinEntry("SECURE BOOT", "Enter PIN:", "", false, true);
+    app.display().unlock();
 }
 
 void AppLockedState::exit(App& app) {

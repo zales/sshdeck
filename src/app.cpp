@@ -61,9 +61,8 @@ void App::initializeHardware() {
     if (BOARD_GPS_EN >= 0) { pinMode(BOARD_GPS_EN, OUTPUT); digitalWrite(BOARD_GPS_EN, HIGH); }
     if (BOARD_6609_EN >= 0) { pinMode(BOARD_6609_EN, OUTPUT); digitalWrite(BOARD_6609_EN, HIGH); }
     
-    // Backlight handled by KeyboardManager (keep off during boot)
-    pinMode(BOARD_KEYBOARD_LED, OUTPUT);
-    digitalWrite(BOARD_KEYBOARD_LED, LOW);
+    // Backlight is initialized by KeyboardManager via PWM (LEDC channel 1).
+    // No need to configure GPIO here — ledcAttachPin takes ownership.
 
     // Disable SPI devices
     pinMode(BOARD_SD_CS, OUTPUT);
@@ -205,7 +204,7 @@ void App::enterDeepSleep() {
 
     _display.getDisplay().powerOff();
     
-    digitalWrite(BOARD_KEYBOARD_LED, LOW);
+    ledcWrite(1, 0); // Backlight PWM off
     if (BOARD_1V8_EN >= 0) digitalWrite(BOARD_1V8_EN, LOW);
     if (BOARD_GPS_EN >= 0) digitalWrite(BOARD_GPS_EN, LOW);
     if (BOARD_6609_EN >= 0) digitalWrite(BOARD_6609_EN, LOW);

@@ -25,8 +25,11 @@
 #define BQ25896_ADDR       0x6B
 #define BQ25896_REG_IINLIM 0x00
 #define BQ25896_REG_CONF   0x02
+#define BQ25896_REG_CHG_CTRL 0x03
 #define BQ25896_REG_ICHG   0x04
 #define BQ25896_REG_IPRE   0x05
+#define BQ25896_REG_VREG   0x06
+#define BQ25896_REG_TIMER  0x07
 #define BQ25896_REG_STAT   0x0B
 #define BQ25896_REG_FAULT  0x0C
 #define BQ25896_REG_VBAT   0x0E
@@ -67,6 +70,7 @@ public:
 private:
     TwoWire* _wire;
     
+    void initCharger();
     uint16_t readFuelGauge16(uint8_t reg);
     uint8_t readCharger8(uint8_t reg);
     void writeCharger8(uint8_t reg, uint8_t val);

@@ -12,6 +12,7 @@ public:
     void handleStorage();
     void handleSystemUpdate();
     void handleWifiMenu();
+    void handleWifiForUpdate();
     void exitStorageMode();
 
 private:

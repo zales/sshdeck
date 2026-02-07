@@ -6,8 +6,55 @@ UIManager::UIManager(DisplayManager& disp) : display(disp) {}
 
 int UIManager::width() const { return display.getWidth(); }
 int UIManager::height() const { return display.getHeight(); }
+int UIManager::contentWidth() const { return display.getWidth(); }
+int UIManager::contentHeight() const { return display.getHeight() - HEADER_H - FOOTER_H; }
 
 U8G2_FOR_ADAFRUIT_GFX& UIManager::getFonts() { return display.getFonts(); }
+
+void UIManager::beginScreen(ScreenMode mode, const String& headerTitle) {
+    _currentMode = mode;
+    _currentHeaderTitle = headerTitle;
+    _screenActive = true;
+    
+    switch (mode) {
+        case SCREEN_FULL:
+            // Full e-ink refresh — updates entire display including header.
+            display.setRefreshMode(false);
+            break;
+        case SCREEN_CONTENT:
+            // Partial refresh limited to content area below header.
+            // Header pixels are never touched — prevents e-ink fading.
+            display.setPartialWindow(0, HEADER_H, display.getWidth(), display.getHeight() - HEADER_H);
+            break;
+        case SCREEN_OVERLAY:
+            // Full refresh, no header. For special screens (help, boot, shutdown).
+            display.setRefreshMode(false);
+            break;
+    }
+}
+
+void UIManager::endScreen() {
+    // Reserved for future use (e.g. tracking, assertions).
+    _screenActive = false;
+}
+
+// Convenience: set mode + render with auto-header in one call.
+// This is the preferred way to draw a screen.
+void UIManager::renderScreen(ScreenMode mode, const String& headerTitle,
+                             std::function<void(U8G2_FOR_ADAFRUIT_GFX&)> drawContent) {
+    beginScreen(mode, headerTitle);
+    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+        // Auto-draw header for FULL and CONTENT modes.
+        // In CONTENT mode, header is drawn into buffer but clipped by partial window.
+        if (mode != SCREEN_OVERLAY) {
+            drawHeader(headerTitle);
+        }
+        if (drawContent) {
+            drawContent(u8g2);
+        }
+    });
+    endScreen();
+}
 
 
 void UIManager::drawCenteredText(int y, const String& text, const uint8_t* font) {
@@ -28,14 +75,8 @@ void UIManager::drawTitleBar(const String& title) {
     u8g2.setBackgroundColor(GxEPD_WHITE);
 }
 
-void UIManager::drawPinEntry(const String& title, const String& subtitle, const String& entry, bool isWrong) {
-    display.setRefreshMode(true); // Partial refresh for responsive PIN typing
-    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
-        drawHeader(title);
-
-        // Subtitle
-        u8g2.setForegroundColor(GxEPD_BLACK);
-        u8g2.setBackgroundColor(GxEPD_WHITE);
+void UIManager::drawPinEntry(const String& title, const String& subtitle, const String& entry, bool isWrong, bool fullRefresh) {
+    renderScreen(fullRefresh ? SCREEN_FULL : SCREEN_CONTENT, title, [&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         drawCenteredText(60, subtitle, u8g2_font_helvR12_tr);
 
         // Box for PIN
@@ -64,10 +105,7 @@ void UIManager::drawPinEntry(const String& title, const String& subtitle, const 
 }
 
 void UIManager::drawMessage(const String& title, const String& message, bool partial) {
-    display.setRefreshMode(partial);
-    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
-        drawHeader(title);
-        
+    renderScreen(partial ? SCREEN_CONTENT : SCREEN_FULL, title, [&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         // Center the message roughly
         int msgY = height() / 2 - 20; // Adjusted for multi-line
         
@@ -98,8 +136,7 @@ void UIManager::drawMessage(const String& title, const String& message, bool par
 }
 
 void UIManager::drawSystemInfo(const String& ip, const String& bat, const String& ram, const String& mac) {
-    setRefreshMode(true); // Partial refresh
-    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+    renderScreen(SCREEN_CONTENT, "System Info", [&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         UILayout layout(*this, "System Info");
         
         layout.addItem("IP:", ip);
@@ -112,8 +149,7 @@ void UIManager::drawSystemInfo(const String& ip, const String& bat, const String
 }
 
 void UIManager::drawShutdownScreen() {
-    display.setRefreshMode(false);
-    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+    renderScreen(SCREEN_OVERLAY, "", [&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         int w = width();
         int h = height();
         
@@ -139,8 +175,7 @@ void UIManager::drawShutdownScreen() {
 }
 
 void UIManager::drawBootScreen(const String& line1, const String& line2) {
-    display.setRefreshMode(false);
-    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+    renderScreen(SCREEN_OVERLAY, "", [&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         int w = width();
         int h = height();
         
@@ -232,17 +267,12 @@ void UIManager::drawAutoConnectScreen(const String& ssid, int remainingSeconds, 
 }
 
 void UIManager::drawScanningScreen(int batteryPercent, bool isCharging) {
-    display.setRefreshMode(false); // Full refresh for scanning
-    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
-         display.getDisplay().fillScreen(GxEPD_WHITE);
-         
-         drawStatusBar("Network Scan", false, batteryPercent, isCharging);
-         
+    updateStatusState(batteryPercent, isCharging, false);
+    renderScreen(SCREEN_FULL, "Network Scan", [&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
          u8g2.setFont(u8g2_font_helvB12_tr);
          u8g2.setForegroundColor(GxEPD_BLACK);
          u8g2.setBackgroundColor(GxEPD_WHITE);
          
-         // Center text
          String title = "Scanning...";
          int tw = u8g2.getUTF8Width(title.c_str());
          u8g2.setCursor((width() - tw) / 2, 120);
@@ -251,12 +281,8 @@ void UIManager::drawScanningScreen(int batteryPercent, bool isCharging) {
 }
 
 void UIManager::drawConnectingScreen(const String& ssid, const String& password, int batteryPercent, bool isCharging) {
-    display.setRefreshMode(false);
-    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
-         display.getDisplay().fillScreen(GxEPD_WHITE);
-         
-         drawStatusBar("Connecting...", false, batteryPercent, isCharging);
-
+    updateStatusState(batteryPercent, isCharging, false);
+    renderScreen(SCREEN_FULL, "Connecting...", [&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
          u8g2.setFont(u8g2_font_helvB12_tr);
          u8g2.setForegroundColor(GxEPD_BLACK);
          u8g2.setBackgroundColor(GxEPD_WHITE);
@@ -276,26 +302,18 @@ void UIManager::drawMenu(const String& title, const std::vector<String>& items, 
     const int itemsStartY = 32;
     
     if (navOnly) {
-        // Navigation only: restrict partial window to items area, excluding the header.
-        // This prevents the black header bar from fading due to repeated partial refreshes —
-        // e-ink partial waveforms don't fully drive particles, so repeated partials weaken contrast.
+        // Navigation: partial window for items area only (below header+gap)
         display.setPartialWindow(0, itemsStartY, display.getWidth(), display.getHeight() - itemsStartY);
     } else {
-        // Initial draw or sub-menu transition: full-screen partial refresh.
-        // After fullClean() in state enter, the controller is properly reset and partial
-        // refresh works correctly on a clean white canvas. Using partial here (vs full)
-        // is faster (~700ms vs ~1100ms) and the header renders with good contrast
-        // because the old→new transition is white→black (maximum drive).
-        setRefreshMode(true);
+        // Initial draw: full refresh with header
+        beginScreen(SCREEN_FULL, title);
     }
     
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
         int w = display.getWidth();
         int h = display.getHeight();
         
-        // Always draw header into buffer (GxEPD2 firstPage clears buffer to white).
-        // When navOnly=true with partial window below header, the header drawing goes
-        // into the buffer but is clipped out by the display driver — no e-ink refresh occurs.
+        // Draw header into buffer — only actually refreshed on full mode
         drawHeader(title);
         
         u8g2.setForegroundColor(GxEPD_BLACK);
@@ -349,16 +367,18 @@ void UIManager::drawMenu(const String& title, const std::vector<String>& items, 
              u8g2.print("v");
         }
     });
+    if (!navOnly) {
+        endScreen();
+    }
 }
 
 void UIManager::drawInputScreen(const String& title, const String& currentText, bool isPassword, bool textOnly) {
     if (textOnly) {
         int w = display.getWidth();
         int boxW = w - 20;
-        // Set partial window to just the input box area (plus small margin)
-        display.setPartialWindow(10, 50, boxW, 32); 
+        display.setPartialWindow(10, 50, boxW, 32);
     } else {
-        setRefreshMode(true);
+        beginScreen(SCREEN_OVERLAY, "");
     }
 
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
@@ -410,6 +430,9 @@ void UIManager::drawInputScreen(const String& title, const String& currentText, 
         u8g2.print(displayStr);
         u8g2.print("_"); 
     });
+    if (!textOnly) {
+        endScreen();
+    }
 }
 
 // Helper to clamp values
@@ -418,18 +441,6 @@ T clamp(T val, T min, T max) {
     if (val < min) return min;
     if (val > max) return max;
     return val;
-}
-
-bool UIManager::_headerContentChanged(const String& title, int bat, bool charging, bool wifi) {
-    if (title != _lastHeaderTitle || bat != _lastHeaderBat ||
-        charging != _lastHeaderCharging || wifi != _lastHeaderWifi) {
-        _lastHeaderTitle = title;
-        _lastHeaderBat = bat;
-        _lastHeaderCharging = charging;
-        _lastHeaderWifi = wifi;
-        return true;
-    }
-    return false;
 }
 
 void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected, bool partial) {
@@ -448,37 +459,22 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
     if (partial) {
         int startRow = -1, endRow = -1;
         bool termDirty = term.getDirtyRange(startRow, endRow);
-        bool headerDirty = _headerContentChanged(statusTitle, batteryPercent, isCharging, wifiConnected);
         
-        // If absolutely nothing changed, skip the entire refresh.
-        // This saves ~700ms of blocking time and avoids any e-ink degradation.
-        if (!termDirty && !headerDirty) {
+        // If nothing changed, skip the entire refresh.
+        if (!termDirty) {
             return;
         }
         
-        // Calculate partial window based on what actually needs refreshing.
-        // Key principle: EXCLUDE the header from partial window when its content hasn't
-        // changed. E-ink partial LUT waveforms don't have a perfect "hold" — even
-        // unchanged black pixels receive a small voltage that degrades them over time.
-        // By only including the header when it truly changed, we prevent fading.
-        int y1, y2;
+        // NEVER include header in partial refresh. The header is drawn once
+        // during full refresh (state enter) and stays untouched. E-ink partial
+        // LUT waveforms degrade unchanged black pixels over time, causing the
+        // header bar to fade. By always excluding it, we prevent this entirely.
+        int y1 = termYStart + (startRow * termLineH) - 8;
+        int y2 = termYStart + (endRow * termLineH) + termLineH;
         
-        if (termDirty && headerDirty) {
-            // Both changed — single window from header top to last dirty row
-            y1 = 0;
-            y2 = termYStart + (endRow * termLineH) + termLineH;
-        } else if (headerDirty) {
-            // Only header changed (e.g. battery % updated) — narrow header-only window
-            y1 = 0;
-            y2 = headerH;
-        } else {
-            // Only terminal content changed — window below header
-            y1 = termYStart + (startRow * termLineH) - 8;
-            y2 = termYStart + (endRow * termLineH) + termLineH;
-        }
-        
-        y1 = clamp(y1, 0, (int)display.getHeight());
-        y2 = clamp(y2, 0, (int)display.getHeight());
+        // Clamp to content area (below header)
+        y1 = clamp(y1, (int)headerH, (int)display.getHeight());
+        y2 = clamp(y2, (int)headerH, (int)display.getHeight());
         
         winY = y1;
         winH = y2 - y1;
@@ -486,9 +482,7 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
         
         display.setPartialWindow(winX, winY, winW, winH);
     } else {
-        display.setRefreshMode(false); // Full Refresh
-        // Sync header state on full refresh so future partials start from known baseline
-        _headerContentChanged(statusTitle, batteryPercent, isCharging, wifiConnected);
+        display.setRefreshMode(false); // Full Refresh — draws everything including header
     }
 
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
@@ -586,25 +580,15 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
 }
 
 void UIManager::drawHelpScreen() {
-    setRefreshMode(false);
-    render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+    renderScreen(SCREEN_CONTENT, "Help", [&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
          int w = display.getWidth();
          int h = display.getHeight();
          
-         // Header
-         display.fillRect(0, 0, w, 24, GxEPD_BLACK);
-         u8g2.setForegroundColor(GxEPD_WHITE);
-         u8g2.setBackgroundColor(GxEPD_BLACK);
-         u8g2.setFont(u8g2_font_helvB12_tr);
-         u8g2.setCursor(5, 18);
-         u8g2.print("Help: Shortcuts");
-         
-         // Content
          u8g2.setForegroundColor(GxEPD_BLACK);
          u8g2.setBackgroundColor(GxEPD_WHITE);
          u8g2.setFont(u8g2_font_helvR10_tr);
          
-         int y = 40; int dy = 16;
+         int y = CONTENT_Y + 12; int dy = 15;
          u8g2.setCursor(5, y); u8g2.print("Mic + W/A/S/D : Arrows"); y+=dy;
          u8g2.setCursor(5, y); u8g2.print("Mic + Q       : ESC"); y+=dy;
          u8g2.setCursor(5, y); u8g2.print("Mic + E       : TAB"); y+=dy;

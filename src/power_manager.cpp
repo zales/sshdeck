@@ -2,6 +2,34 @@
 
 void PowerManager::begin(TwoWire& wire) {
     _wire = &wire;
+    initCharger();
+}
+
+void PowerManager::initCharger() {
+    // REG06: Charge Voltage Limit = 4.208V
+    //   VREG[5:0] = 23 (3840 + 23*16 = 4208mV), BATLOWV=1 (3.0V), VRECHG=0 (100mV)
+    writeCharger8(BQ25896_REG_VREG, 0x5E);
+    
+    // REG05: Pre-charge 128mA, Termination current 64mA
+    //   IPRECHG[3:0] = 0001 (64+64=128mA), ITERM[3:0] = 0000 (64mA)
+    //   Default was 256mA termination — too high, caused early charge termination
+    writeCharger8(BQ25896_REG_IPRE, 0x10);
+    
+    // REG03: Enable charging, reset watchdog
+    //   WD_RST=1, CHG_CONFIG=1, SYS_MIN=101 (3.5V), MIN_VBAT_SEL=0
+    writeCharger8(BQ25896_REG_CHG_CTRL, 0x5A);
+    
+    // REG07: Disable watchdog (so our settings persist), enable termination
+    //   EN_TERM=1, STAT_DIS=0, WATCHDOG=00 (disabled), EN_TIMER=1, CHG_TIMER=01 (8h)
+    writeCharger8(BQ25896_REG_TIMER, 0x8A);
+    
+    // REG04: Charge current = 1024mA (safe default)
+    //   ICHG[6:0] = 16 (16*64 = 1024mA)
+    writeCharger8(BQ25896_REG_ICHG, 0x10);
+    
+    // REG00: Input current limit = 1500mA, disable Hi-Z
+    //   EN_HIZ=0, EN_ILIM=0, IINLIM = 28 (100 + 28*50 = 1500mA)
+    writeCharger8(BQ25896_REG_IINLIM, 0x1C);
 }
 
 uint16_t PowerManager::readFuelGauge16(uint8_t reg) {
@@ -59,11 +87,42 @@ float PowerManager::getVoltage() {
 
 int PowerManager::getPercentage() {
     if (BOARD_BAT_ADC < 0) {
-         uint16_t soc = readFuelGauge16(BQ27220_REG_SOC);
-         // Clamp to 0-100: BQ27220 can return >100 during calibration,
-         // or 0xFFFF on I2C failure
-         if (soc > 100) soc = 100;
-         return (int)soc;
+        // Voltage-based SOC lookup — more reliable than BQ27220 coulomb counter
+        // without a completed learning cycle. Uses OCV (open-circuit voltage) curve
+        // for typical Li-ion (LiCoO2/NMC) single cell.
+        float v = getVoltage();
+        if (v <= 0.0f) return 0;  // I2C failure
+        
+        // Voltage-to-SOC table (mV thresholds, linear interpolation between points)
+        // Based on typical Li-ion OCV discharge curve
+        struct VoltPct { float v; int pct; };
+        static const VoltPct table[] = {
+            {4.18f, 100},
+            {4.10f,  90},
+            {4.00f,  80},
+            {3.93f,  70},
+            {3.87f,  60},
+            {3.82f,  50},
+            {3.78f,  40},
+            {3.74f,  30},
+            {3.68f,  20},
+            {3.55f,  10},
+            {3.40f,   5},
+            {3.20f,   0},
+        };
+        static const int tableLen = sizeof(table) / sizeof(table[0]);
+        
+        if (v >= table[0].v) return 100;
+        if (v <= table[tableLen - 1].v) return 0;
+        
+        for (int i = 0; i < tableLen - 1; i++) {
+            if (v >= table[i + 1].v) {
+                // Linear interpolation between table[i] and table[i+1]
+                float ratio = (v - table[i + 1].v) / (table[i].v - table[i + 1].v);
+                return table[i + 1].pct + (int)(ratio * (table[i].pct - table[i + 1].pct));
+            }
+        }
+        return 0;
     }
     return 0;
 }

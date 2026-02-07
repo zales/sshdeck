@@ -159,7 +159,6 @@ void SettingsController::showBatteryInfo() {
          if (status.voltage > 0) { // If fuel gauge active
              msg += "Cur: " + String(status.currentMa) + " mA\n";
              msg += "Cap: " + String(status.remainingCap) + " / " + String(status.fullCap) + "\n";
-             msg += "Hlth: " + String(status.soh) + "% Cyc: " + String(status.cycles) + "\n";
              msg += "Tmp: " + String(status.temperature, 1) + " C";
          }
          return msg;
@@ -180,7 +179,28 @@ void SettingsController::showBatteryInfo() {
 
 void SettingsController::handleSystemUpdate() {
     if (WiFi.status() != WL_CONNECTED) {
-        _system.menu()->showMessage("Error", "No WiFi Connection", [this](){ showSettingsMenu(); });
+        // Try auto-connecting to saved WiFi first
+        auto saved = _system.wifi().getSavedNetworks();
+        if (saved.empty()) {
+            // No saved networks — go to WiFi menu, then retry update
+            _system.menu()->showMessage("WiFi Required", "No saved networks.\nOpening WiFi setup...", nullptr);
+            _system.menu()->setOnLoop([this](){
+                _system.menu()->setOnLoop(nullptr);
+                handleWifiForUpdate();
+            });
+            return;
+        }
+        _system.menu()->showMessage("Connecting WiFi", "Please wait...", nullptr);
+        _system.menu()->setOnLoop([this](){
+            _system.menu()->setOnLoop(nullptr);
+            if (_system.wifi().connect()) {
+                // Connected — proceed with update
+                handleSystemUpdate();
+            } else {
+                // Auto-connect failed — offer WiFi menu
+                handleWifiForUpdate();
+            }
+        });
         return;
     }
     
@@ -243,6 +263,98 @@ void SettingsController::handleSystemUpdate() {
             }, [this](){ showSettingsMenu(); });
          }
     });
+}
+
+void SettingsController::handleWifiForUpdate() {
+    std::vector<String> items = {"Scan Networks", "Saved Networks", "Manual Connect", "Cancel"};
+    _system.menu()->showMenu("WiFi for Update", items, [this](int choice) {
+        if (choice == 0) {
+            // Scan
+            _system.menu()->showMessage("WiFi", "Scanning...", nullptr);
+            _system.menu()->setOnLoop([this](){
+                _system.menu()->setOnLoop(nullptr);
+                auto networks = _system.wifi().scan();
+                if (networks.empty()) {
+                    _system.menu()->showMessage("Scan", "No networks found", [this](){ handleWifiForUpdate(); });
+                    return;
+                }
+                std::vector<String> labels;
+                for (const auto& net : networks) {
+                    String label = net.ssid;
+                    while (label.length() < 14) label += " ";
+                    if (label.length() > 14) label = label.substring(0, 14);
+                    label += (net.secure ? "*" : " ");
+                    label += " ";
+                    if (net.rssi > -60) label += "[====]";
+                    else if (net.rssi > -70) label += "[=== ]";
+                    else if (net.rssi > -80) label += "[==  ]";
+                    else label += "[=   ]";
+                    labels.push_back(label);
+                }
+                _system.menu()->showMenu("Select Network", labels, [this, networks](int idx) {
+                    if (idx < 0 || idx >= (int)networks.size()) return;
+                    String ssid = networks[idx].ssid;
+                    // Check for saved password
+                    auto saved = _system.wifi().getSavedNetworks();
+                    String existingPass = "";
+                    for (auto& s : saved) {
+                        if (s.ssid == ssid) { existingPass = s.pass; break; }
+                    }
+                    _system.menu()->showInput("Password", existingPass, true, [this, ssid](String pass) {
+                        _system.menu()->showMessage("Connecting", "Please wait...", nullptr);
+                        _system.menu()->setOnLoop([this, ssid, pass](){
+                            _system.menu()->setOnLoop(nullptr);
+                            if (_system.wifi().connectTo(ssid, pass)) {
+                                _system.wifi().save(ssid, pass);
+                                handleSystemUpdate(); // Proceed to update
+                            } else {
+                                _system.menu()->showMessage("Error", "Connection Failed", [this](){ handleWifiForUpdate(); });
+                            }
+                        });
+                    }, [this](){ handleWifiForUpdate(); });
+                }, [this](){ handleWifiForUpdate(); });
+            });
+        } else if (choice == 1) {
+            // Saved networks
+            auto saved = _system.wifi().getSavedNetworks();
+            if (saved.empty()) {
+                _system.menu()->showMessage("Saved", "No saved networks", [this](){ handleWifiForUpdate(); });
+                return;
+            }
+            std::vector<String> labels;
+            for (auto& s : saved) labels.push_back(s.ssid);
+            _system.menu()->showMenu("Saved Networks", labels, [this, saved](int idx) {
+                if (idx < 0 || idx >= (int)saved.size()) return;
+                _system.menu()->showMessage("Connecting", "Please wait...", nullptr);
+                _system.menu()->setOnLoop([this, saved, idx](){
+                    _system.menu()->setOnLoop(nullptr);
+                    if (_system.wifi().connectTo(saved[idx].ssid, saved[idx].pass)) {
+                        handleSystemUpdate(); // Proceed to update
+                    } else {
+                        _system.menu()->showMessage("Error", "Failed", [this](){ handleWifiForUpdate(); });
+                    }
+                });
+            }, [this](){ handleWifiForUpdate(); });
+        } else if (choice == 2) {
+            // Manual
+            _system.menu()->showInput("SSID", "", false, [this](String ssid) {
+                _system.menu()->showInput("Password", "", true, [this, ssid](String pass) {
+                    _system.menu()->showMessage("Connecting", "Please wait...", nullptr);
+                    _system.menu()->setOnLoop([this, ssid, pass](){
+                        _system.menu()->setOnLoop(nullptr);
+                        if (_system.wifi().connectTo(ssid, pass)) {
+                            _system.wifi().save(ssid, pass);
+                            handleSystemUpdate();
+                        } else {
+                            _system.menu()->showMessage("Error", "Connection Failed", [this](){ handleWifiForUpdate(); });
+                        }
+                    });
+                }, [this](){ handleWifiForUpdate(); });
+            }, [this](){ handleWifiForUpdate(); });
+        } else {
+            showSettingsMenu();
+        }
+    }, [this](){ showSettingsMenu(); });
 }
 
 void SettingsController::handleWifiMenu() {

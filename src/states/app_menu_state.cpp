@@ -49,7 +49,7 @@ void AppMenuState::update(App& app) {
     // Explicit redraw if we suppressed it during batch processing
     if (needsRedraw) {
         app.display().lock();
-        app.menu()->draw();
+        app.menu()->draw(true); // navOnly: exclude header from partial refresh
         app.display().unlock();
     }
     
@@ -64,7 +64,7 @@ void AppMenuState::update(App& app) {
 void AppMenuState::onRefresh(App& app) {
     if (app.menu()) {
         app.display().lock();
-        app.menu()->draw();
+        app.menu()->draw(true); // navOnly: exclude header from partial refresh
         app.display().unlock();
     }
 }

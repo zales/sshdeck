@@ -7,6 +7,23 @@
 class DisplayManager;
 class TerminalEmulator;
 
+// --- Screen Refresh Modes ---
+// Controls how the display is updated and which regions are refreshed.
+// The header (status bar, 16px) is a PROTECTED ZONE — it is only drawn
+// during FULL mode. All other modes operate below the header to prevent
+// e-ink partial refresh degradation (fading of black pixels).
+enum ScreenMode {
+    SCREEN_FULL,       // Full refresh, entire screen including header. Use for state transitions.
+    SCREEN_CONTENT,    // Partial refresh, content area only (y >= HEADER_H). Header untouched.
+    SCREEN_OVERLAY,    // Full refresh, entire screen but no header drawn. For special screens (help, shutdown).
+};
+
+// Layout constants
+static const int HEADER_H    = 16;   // Status bar height
+static const int CONTENT_Y   = 18;   // First usable Y for content (below header + 2px gap)
+static const int FOOTER_H    = 16;   // Footer bar height
+static const int LINE_H      = 16;   // Standard line height for menus/lists
+
 class UIManager {
 public:
     UIManager(DisplayManager& display);
@@ -14,9 +31,30 @@ public:
     // Helpers to get dimensions dynamically
     int width() const;
     int height() const;
+    
+    // --- Screen lifecycle ---
+    // Call beginScreen() before drawing, endScreen() after.
+    // This ensures correct refresh mode, partial windows, and header protection.
+    //   SCREEN_FULL:    full refresh, draws header. For state transitions.
+    //   SCREEN_CONTENT: partial refresh below header. For updates within a state.
+    //   SCREEN_OVERLAY: full refresh, no header. For special screens (help, boot, shutdown).
+    void beginScreen(ScreenMode mode, const String& headerTitle = "");
+    void endScreen();
+    
+    // Convenience: set mode + render with auto-header in one call.
+    // This is the PREFERRED way to draw a screen.
+    // Header is drawn automatically for FULL/CONTENT modes.
+    void renderScreen(ScreenMode mode, const String& headerTitle,
+                      std::function<void(U8G2_FOR_ADAFRUIT_GFX&)> drawContent);
+    
+    // Content area dimensions (below header, above footer)
+    int contentWidth() const;
+    int contentHeight() const;
+    int contentTop() const { return CONTENT_Y; }
+    int contentBottom() const { return height() - FOOTER_H; }
 
     // Standard Screens
-    void drawPinEntry(const String& title, const String& subtitle, const String& entry, bool isWrong = false);
+    void drawPinEntry(const String& title, const String& subtitle, const String& entry, bool isWrong = false, bool fullRefresh = false);
     void drawMessage(const String& title, const String& message, bool partial = false);
     void drawSystemInfo(const String& ip, const String& bat, const String& ram, const String& mac);
     void drawShutdownScreen();
@@ -68,15 +106,10 @@ private:
     bool currentCharging = false;
     bool currentWifi = false;
     
-    // Header dirty tracking: only include header in partial refresh when content changed.
-    // E-ink partial LUT doesn't have a perfect no-op — repeated partials on unchanged
-    // black areas gradually fade them. By excluding the header when unchanged, we
-    // prevent degradation entirely.
-    String _lastHeaderTitle = "";
-    int _lastHeaderBat = -1;
-    bool _lastHeaderCharging = false;
-    bool _lastHeaderWifi = false;
-    bool _headerContentChanged(const String& title, int bat, bool charging, bool wifi);
+    // beginScreen/endScreen state
+    ScreenMode _currentMode = SCREEN_FULL;
+    String _currentHeaderTitle = "";
+    bool _screenActive = false;
 };
 
 // UI Layout Helper for automatic positioning
@@ -96,4 +129,3 @@ private:
     UIManager& ui;
     int currentY;
 };
-    void setRefreshMode(bool partial);
