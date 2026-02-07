@@ -16,6 +16,7 @@
 #include "storage_manager.h"
 #include "ota_manager.h"
 #include "power_manager.h"
+#include "touch_manager.h"
 #include "app_state.h"
 #include "system_context.h"
 #include "controllers/settings_controller.h"
@@ -66,6 +67,7 @@ public:
     SSHClient* sshClient() override { return _sshClient.get(); }
     SecurityManager& security() override { return _security; }
     OtaManager& ota() override { return _ota; }
+    TouchManager& touch() override { return _touch; }
 
     SettingsController& settingsController() { return *_settingsController; }
     ConnectionController& connectionController() { return *_connectionController; }
@@ -81,6 +83,7 @@ private:
     UIManager _ui;
     TerminalEmulator _terminal;
     PowerManager _power;
+    TouchManager _touch;
     ServerManager _serverManager;
     StorageManager _storage;
     WifiManager _wifi;

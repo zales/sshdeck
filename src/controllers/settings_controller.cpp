@@ -5,7 +5,8 @@
 #include "storage_manager.h"
 #include "ota_manager.h"
 #include "security_manager.h"
-#include "server_manager.h" // Added to satisfy dependency
+#include "server_manager.h"
+#include "touch_manager.h"
 #include <WiFi.h>
 
 SettingsController::SettingsController(ISystemContext& system) : _system(system) {
@@ -18,7 +19,8 @@ void SettingsController::showSettingsMenu() {
         "Storage & Keys",
         "System Update",
         "System Info",
-        "Battery Info"
+        "Battery Info",
+        "Touch Test"
     };
     _system.menu()->showMenu("Settings", items, [this](int choice) {
         if (choice == 0) {
@@ -44,6 +46,9 @@ void SettingsController::showSettingsMenu() {
         }
         else if (choice == 5) {
             showBatteryInfo();
+        }
+        else if (choice == 6) {
+            handleTouchTest();
         }
     }, [this]() {
         _system.handleMainMenu();
@@ -173,6 +178,53 @@ void SettingsController::showBatteryInfo() {
         if (millis() - lastUp > 1000) {
             lastUp = millis();
             _system.menu()->updateMessage(getBatteryMsg());
+        }
+    });
+}
+
+void SettingsController::handleTouchTest() {
+    String initMsg = "Model: " + String(_system.touch().getModelName()) +
+                     "\nChip ID: 0x" + String(_system.touch().getChipId(), HEX) +
+                     "\nINT pin: " + String(digitalRead(BOARD_TOUCH_INT)) +
+                     "\n\nTouch the screen...\nPress key to exit.";
+    _system.menu()->showMessage("TOUCH TEST", initMsg, [this](){ showSettingsMenu(); });
+    
+    _system.menu()->setOnLoop([this](){
+        static unsigned long lastUp = 0;
+        static String lastGesture = "none";
+        static int lastX = 0, lastY = 0;
+        static int eventCount = 0;
+        
+        if (_system.touch().available()) {
+            TouchEvent te = _system.touch().read();
+            if (te.touched || te.gesture != GESTURE_NONE) {
+                eventCount++;
+                if (te.x != 0 || te.y != 0) {
+                    lastX = te.x;
+                    lastY = te.y;
+                }
+            }
+            
+            switch (te.gesture) {
+                case GESTURE_SWIPE_UP:    lastGesture = "SWIPE UP"; break;
+                case GESTURE_SWIPE_DOWN:  lastGesture = "SWIPE DOWN"; break;
+                case GESTURE_SWIPE_LEFT:  lastGesture = "SWIPE LEFT"; break;
+                case GESTURE_SWIPE_RIGHT: lastGesture = "SWIPE RIGHT"; break;
+                case GESTURE_SINGLE_TAP:  lastGesture = "TAP"; break;
+                case GESTURE_LONG_PRESS:  lastGesture = "LONG PRESS"; break;
+                default: break;
+            }
+        }
+        
+        if (millis() - lastUp > 500) {
+            lastUp = millis();
+            String msg = "Model: " + String(_system.touch().getModelName()) + "\n";
+            msg += "Chip ID: 0x" + String(_system.touch().getChipId(), HEX) + "\n";
+            msg += "Events: " + String(eventCount) + "\n";
+            msg += "Gesture: " + lastGesture + "\n";
+            msg += "X:" + String(lastX) + " Y:" + String(lastY) +
+                   " INT:" + String(digitalRead(BOARD_TOUCH_INT));
+            _system.menu()->updateMessage(msg);
         }
     });
 }

@@ -5,7 +5,8 @@ TerminalEmulator::TerminalEmulator()
       current_inverse(false), ansi_state(ANSI_NORMAL),
       show_cursor(true), application_cursor_mode(false), need_display_update(false),
       scrollTop(0), scrollBottom(TERM_ROWS - 1),
-      is_alt_buffer(false), use_line_drawing(false) {
+      is_alt_buffer(false), use_line_drawing(false),
+      _scrollbackHead(0), _scrollbackCount(0), _viewOffset(0) {
       
     // Point to primary buffer initially
     term_lines = lines_primary;
@@ -19,6 +20,13 @@ TerminalEmulator::TerminalEmulator()
         for (int j = 0; j < TERM_COLS; j++) {
             attrs_primary[i][j].inverse = false;
             attrs_alt[i][j].inverse = false;
+        }
+    }
+    // Initialize scrollback buffer
+    for (int i = 0; i < SCROLLBACK_LINES; i++) {
+        _scrollback[i][0] = '\0';
+        for (int j = 0; j < TERM_COLS; j++) {
+            _scrollbackAttrs[i][j].inverse = false;
         }
     }
     _mutex = xSemaphoreCreateMutex();
@@ -791,6 +799,10 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
 }
 
 void TerminalEmulator::scrollUp() {
+    // Save the top line to scrollback before it gets overwritten (primary buffer only)
+    if (!is_alt_buffer && scrollTop == 0) {
+        pushScrollbackLine(term_lines[0], term_attrs[0]);
+    }
     for (int i = scrollTop; i < scrollBottom; i++) {
         memcpy(term_lines[i], term_lines[i + 1], TERM_COLS + 1);
         for (int j = 0; j < TERM_COLS; j++) {
@@ -824,4 +836,65 @@ void TerminalEmulator::scrollDown() {
         dirty_rows[i] = true;
     }
     need_display_update = true;
+}
+
+// --- Scrollback ---
+
+void TerminalEmulator::pushScrollbackLine(const char* line, const CharAttr* attrs) {
+    memcpy(_scrollback[_scrollbackHead], line, TERM_COLS + 1);
+    memcpy(_scrollbackAttrs[_scrollbackHead], attrs, TERM_COLS * sizeof(CharAttr));
+    _scrollbackHead = (_scrollbackHead + 1) % SCROLLBACK_LINES;
+    if (_scrollbackCount < SCROLLBACK_LINES) _scrollbackCount++;
+}
+
+void TerminalEmulator::scrollViewUp(int lines) {
+    int maxOffset = _scrollbackCount;
+    _viewOffset += lines;
+    if (_viewOffset > maxOffset) _viewOffset = maxOffset;
+    for (int i = 0; i < TERM_ROWS; i++) dirty_rows[i] = true;
+    need_display_update = true;
+}
+
+void TerminalEmulator::scrollViewDown(int lines) {
+    _viewOffset -= lines;
+    if (_viewOffset < 0) _viewOffset = 0;
+    for (int i = 0; i < TERM_ROWS; i++) dirty_rows[i] = true;
+    need_display_update = true;
+}
+
+void TerminalEmulator::scrollViewReset() {
+    if (_viewOffset != 0) {
+        _viewOffset = 0;
+        for (int i = 0; i < TERM_ROWS; i++) dirty_rows[i] = true;
+        need_display_update = true;
+    }
+}
+
+const char* TerminalEmulator::getDisplayLine(int row) const {
+    if (_viewOffset == 0 || is_alt_buffer) {
+        return getLine(row); // Live view
+    }
+    // With _viewOffset lines scrolled back:
+    //   rows 0..(viewOffset-1) come from scrollback
+    //   rows viewOffset..(TERM_ROWS-1) come from live buffer rows 0..(TERM_ROWS-1-viewOffset)
+    if (row < _viewOffset) {
+        int linesBack = _viewOffset - row; // 1-based from most recent
+        int idx = (_scrollbackHead - linesBack + SCROLLBACK_LINES) % SCROLLBACK_LINES;
+        return _scrollback[idx];
+    }
+    return getLine(row - _viewOffset);
+}
+
+const CharAttr& TerminalEmulator::getDisplayAttr(int row, int col) const {
+    static CharAttr defaultAttr = {false};
+    if (_viewOffset == 0 || is_alt_buffer) {
+        return getAttr(row, col);
+    }
+    if (row < _viewOffset) {
+        int linesBack = _viewOffset - row;
+        int idx = (_scrollbackHead - linesBack + SCROLLBACK_LINES) % SCROLLBACK_LINES;
+        if (col >= 0 && col < TERM_COLS) return _scrollbackAttrs[idx][col];
+        return defaultAttr;
+    }
+    return getAttr(row - _viewOffset, col);
 }

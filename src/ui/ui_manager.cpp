@@ -499,7 +499,7 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
         for (int row = 0; row < TERM_ROWS; row++) {
             // We draw all rows. The clipping of the Partial Window takes care of optimization.
             
-            const char* line = term.getLine(row);
+            const char* line = term.getDisplayLine(row);
             int py = termYStart + (row * termLineH);
             
             // Optimization inside the loop:
@@ -520,13 +520,13 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
             if (line[0] != '\0') {
                 int col = 0;
                 while (line[col] != '\0' && col < TERM_COLS) {
-                    bool inv = term.getAttr(row, col).inverse;
+                    bool inv = term.getDisplayAttr(row, col).inverse;
                     int startCol = col;
                     char buf[TERM_COLS + 1];
                     int bi = 0;
                     
                     // Batch consecutive characters with the same inverse attribute
-                    while (col < TERM_COLS && line[col] != '\0' && term.getAttr(row, col).inverse == inv) {
+                    while (col < TERM_COLS && line[col] != '\0' && term.getDisplayAttr(row, col).inverse == inv) {
                         buf[bi++] = line[col++];
                     }
                     buf[bi] = '\0';
@@ -547,7 +547,7 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
                 }
             }
         }
-        if (term.isCursorVisible()) {
+        if (term.isCursorVisible() && !term.isViewingHistory()) {
             int cx = term.getCursorX();
             int cy = term.getCursorY();
             if (cx >= 0 && cx < TERM_COLS && cy >= 0 && cy < TERM_ROWS) {
@@ -562,7 +562,7 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
                 
                 if (!skipCursor) {
                     char cursorChar = ' ';
-                    const char* line = term.getLine(cy);
+                    const char* line = term.getDisplayLine(cy);
                     int len = 0;
                     while(line[len] != 0 && len < TERM_COLS) len++;
                     

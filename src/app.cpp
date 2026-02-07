@@ -89,6 +89,7 @@ void App::initializeHardware() {
     Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL, 100000); // Force 100kHz
     
     _power.begin(Wire);
+    _touch.begin(Wire);
 
     if (!_display.begin()) {
         Serial.println("Display init failed!");
@@ -247,6 +248,11 @@ void App::drawTerminalScreen(bool partial) {
         String host = _sshClient->getConnectedHost();
         if (host.length() > 10) host = host.substring(0, 10);
         title += host;
+    }
+    
+    // Show scroll indicator when viewing history
+    if (_terminal.isViewingHistory()) {
+        title = "[+" + String(_terminal.getViewOffset()) + "] " + title;
     }
 
     _ui.drawTerminal(_terminal, title, _power.getPercentage(), _power.isCharging(), WiFi.status() == WL_CONNECTED, partial);

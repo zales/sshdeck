@@ -13,6 +13,7 @@ public:
     void handleSystemUpdate();
     void handleWifiMenu();
     void handleWifiForUpdate();
+    void handleTouchTest();
     void exitStorageMode();
 
 private:

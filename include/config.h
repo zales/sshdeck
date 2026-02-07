@@ -23,6 +23,7 @@
 // Terminal Configuration
 #define TERM_COLS     40
 #define TERM_ROWS     30
+#define SCROLLBACK_LINES 200  // Ring buffer for scroll history
 #define TERM_TYPE     "xterm-mono"
 
 // Display Configuration

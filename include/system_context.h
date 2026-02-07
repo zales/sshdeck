@@ -16,6 +16,7 @@ class MenuSystem;
 class SSHClient;
 class SecurityManager;
 class OtaManager;
+class TouchManager;
 
 class ISystemContext {
 public:
@@ -34,6 +35,7 @@ public:
     virtual SSHClient* sshClient() = 0;
     virtual SecurityManager& security() = 0;
     virtual OtaManager& ota() = 0;
+    virtual TouchManager& touch() = 0;
 
     // Logic Handlers required by controllers
     virtual void handleMainMenu() = 0;

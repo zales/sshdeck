@@ -40,6 +40,17 @@ public:
     void clearUpdateFlag();
     bool isAppCursorMode() const { return application_cursor_mode; }
     
+    // Scrollback history
+    void scrollViewUp(int lines = 3);    // Scroll back into history
+    void scrollViewDown(int lines = 3);  // Scroll forward toward live
+    void scrollViewReset();              // Return to live view
+    int  getViewOffset() const { return _viewOffset; }
+    bool isViewingHistory() const { return _viewOffset > 0; }
+    
+    // Get line for display (accounts for scrollback offset)
+    const char* getDisplayLine(int row) const;
+    const CharAttr& getDisplayAttr(int row, int col) const;
+    
     // Check specifically which rows are dirty
     bool isRowDirty(int row) const { return (row >= 0 && row < TERM_ROWS) ? dirty_rows[row] : false; }
     
@@ -106,4 +117,13 @@ private:
     void switchBuffer(bool alt);
     
     SemaphoreHandle_t _mutex;
+    
+    // Scrollback ring buffer
+    char _scrollback[SCROLLBACK_LINES][TERM_COLS + 1];
+    CharAttr _scrollbackAttrs[SCROLLBACK_LINES][TERM_COLS];
+    int _scrollbackHead;   // Next write position (ring buffer)
+    int _scrollbackCount;  // How many lines stored (0..SCROLLBACK_LINES)
+    int _viewOffset;       // 0 = live view, >0 = scrolled back N lines
+    
+    void pushScrollbackLine(const char* line, const CharAttr* attrs);
 };

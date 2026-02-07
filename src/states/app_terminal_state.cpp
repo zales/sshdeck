@@ -1,5 +1,6 @@
 #include "states/app_terminal_state.h"
 #include "states/app_menu_state.h"
+#include "touch_manager.h"
 #include "app.h"
 
 void AppTerminalState::enter(App& app) {
@@ -29,6 +30,10 @@ void AppTerminalState::update(App& app) {
         // Handle async state checking
         if (app.sshClient()) {
             if (app.sshClient()->getState() == SSHClient::CONNECTED) {
+                // Any keypress while viewing history → return to live
+                if (app.terminal().isViewingHistory()) {
+                    app.terminal().scrollViewReset();
+                }
                 if (event.type == EVENT_KEY_PRESS && event.key != 0) {
                     app.sshClient()->write(event.key);
                 }
@@ -41,6 +46,36 @@ void AppTerminalState::update(App& app) {
     // Ideally we should process the *result* of pollInputs.
     // But pollInputs calls keyboard.loop().
     // Let's stick to the while loop above for fast typing, assuming polls are cheap.
+
+    // 2. Process touch gestures for scrollback
+    if (app.touch().available()) {
+        TouchEvent te = app.touch().read();
+        bool scrollChanged = false;
+        if (te.gesture == GESTURE_SWIPE_DOWN) {
+            // Swipe down on screen = scroll back into history
+            app.terminal().lock();
+            app.terminal().scrollViewUp(5);
+            app.terminal().unlock();
+            scrollChanged = true;
+        } else if (te.gesture == GESTURE_SWIPE_UP) {
+            // Swipe up on screen = scroll forward toward live
+            app.terminal().lock();
+            app.terminal().scrollViewDown(5);
+            app.terminal().unlock();
+            scrollChanged = true;
+        } else if (te.gesture == GESTURE_SINGLE_TAP) {
+            // Tap = return to live view
+            app.terminal().lock();
+            app.terminal().scrollViewReset();
+            app.terminal().unlock();
+            scrollChanged = true;
+        }
+        // Force immediate redraw after scroll gesture
+        if (scrollChanged) {
+            _lastDisplayUpdate = millis();
+            app.drawTerminalScreen();
+        }
+    }
 
     if (app.sshClient()) {
          auto state = app.sshClient()->getState();
@@ -67,6 +102,9 @@ void AppTerminalState::update(App& app) {
             // 2. Read available SSH data (bulk read)
             app.sshClient()->process();
             
+            // Don't auto-reset scrollback — let user browse history
+            // New data will be buffered and visible when user returns to live view
+            
             bool forceRedraw = false;
             // Battery Charging Animation (every 1 sec)
             if (app.power().isCharging() && (millis() - _lastAniUpdate > 1000)) {
@@ -74,7 +112,7 @@ void AppTerminalState::update(App& app) {
                 forceRedraw = true;
             }
 
-            if (app.terminal().needsUpdate() || forceRedraw) {
+            if ((app.terminal().needsUpdate() && !app.terminal().isViewingHistory()) || forceRedraw) {
                  // Debounce: don't refresh faster than DISPLAY_UPDATE_INTERVAL_MS
                  // E-ink partial refresh takes ~700ms, rapid redraws are wasteful
                  if (millis() - _lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL_MS) {
