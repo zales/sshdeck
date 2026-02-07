@@ -12,8 +12,12 @@ def fix_cst328_constants():
     with open(filepath, "r") as f:
         content = f.read()
     
-    if content.rstrip().endswith("#endif"):
-        return  # Already fixed
+    # Count #ifndef vs #endif to check if balanced
+    ifndef_count = content.count("#ifndef")
+    endif_count = content.count("#endif")
+    
+    if endif_count >= ifndef_count:
+        return  # Already balanced
     
     with open(filepath, "a") as f:
         f.write("\n#endif // CSE_CST328_CONSTANTS_H\n")
