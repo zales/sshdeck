@@ -1,6 +1,7 @@
 #pragma once
 #include "ui_manager.h"
 #include "event_types.h"
+#include "touch_manager.h"
 #include <functional>
 
 enum MenuState {
@@ -17,6 +18,7 @@ struct MenuConfig {
     String message;
     bool isPassword;
     int selected;
+    int scrollOffset; 
     
     // Callbacks
     std::function<void(int)> onSelect;       // For Lists
@@ -38,7 +40,8 @@ public:
     
     // The Loop methods
     bool handleInput(InputEvent e, bool suppressDraw = false); 
-    void draw(bool partial = false); 
+    bool handleTouch(TouchEvent t, bool suppressDraw = false);
+    void draw(bool partial = false, int prevSelected = -1);  
     void reset();
 
     // State getters

@@ -23,6 +23,7 @@ struct TouchEvent {
     TouchGesture gesture;
     int x;
     int y;
+    int magnitude; // Distance in pixels for swipes
 };
 
 class TouchManager {
@@ -63,6 +64,7 @@ private:
     volatile TouchGesture _pendingGesture = GESTURE_NONE;
     volatile bool _pendingTouched = false;
     volatile int _pendingX = 0, _pendingY = 0;
+    volatile int _pendingMagnitude = 0;
     portMUX_TYPE _spinlock = portMUX_INITIALIZER_UNLOCKED;
 
     // FreeRTOS task

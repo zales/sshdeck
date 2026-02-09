@@ -89,6 +89,11 @@ private:
     int cursor_y;
     int saved_cursor_x;
     int saved_cursor_y;
+    
+    // Specific save slot for ?1049 alternate screen buffer switch
+    int saved_cursor_x_1049;
+    int saved_cursor_y_1049;
+    
     int scrollTop;     // Top margin (0-based)
     int scrollBottom;  // Bottom margin (0-based, inclusive)
     bool current_inverse;

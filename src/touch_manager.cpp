@@ -55,7 +55,7 @@ bool TouchManager::available() {
 }
 
 TouchEvent TouchManager::read() {
-    TouchEvent ev = {false, GESTURE_NONE, 0, 0};
+    TouchEvent ev = {false, GESTURE_NONE, 0, 0, 0};
     if (!_initialized) return ev;
     
     portENTER_CRITICAL(&_spinlock);
@@ -63,8 +63,10 @@ TouchEvent TouchManager::read() {
     ev.touched = _pendingTouched;
     ev.x = _pendingX;
     ev.y = _pendingY;
+    ev.magnitude = _pendingMagnitude;
     // Consume the gesture (one-shot)
     _pendingGesture = GESTURE_NONE;
+    _pendingMagnitude = 0;
     // Keep touched state — it reflects live state
     portEXIT_CRITICAL(&_spinlock);
     
@@ -147,6 +149,7 @@ void TouchManager::pollLoop() {
                 _pendingTouched = false;
                 if (gest != GESTURE_NONE) {
                     _pendingGesture = gest;  // Queue for main loop
+                    _pendingMagnitude = (abs(dy) > abs(dx)) ? abs(dy) : abs(dx);
                 }
                 portEXIT_CRITICAL(&_spinlock);
             }
@@ -172,6 +175,7 @@ void TouchManager::pollLoop() {
             portENTER_CRITICAL(&_spinlock);
             _pendingTouched = false;
             if (gest != GESTURE_NONE) {
+                _pendingMagnitude = (abs(dy) > abs(dx)) ? abs(dy) : abs(dx);
                 _pendingGesture = gest;
             }
             portEXIT_CRITICAL(&_spinlock);

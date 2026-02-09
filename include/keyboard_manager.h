@@ -17,6 +17,7 @@ enum SystemEvent {
 class KeyboardManager {
 public:
     KeyboardManager();
+    static KeyboardManager* getInstance();
     
     bool begin();
     void loop(); // System loop for handling side buttons etc
@@ -40,8 +41,11 @@ public:
     void setBacklight(bool on); // Legacy: sets max or off
     void setBacklightLevel(uint8_t level); // 0=off, 1=low, 2=med, 3=high
     uint8_t getBacklightLevel() const { return _backlightLevel; }
+    
+    void triggerHaptic(); // Public for UI
 
 private:
+    static KeyboardManager* instance;
     Adafruit_TCA8418 keypad;
     QueueHandle_t hapticQueue;
     QueueHandle_t inputQueue;
@@ -60,7 +64,7 @@ private:
     static void hapticTask(void* parameter);
     static void inputTask(void* parameter);
     static void IRAM_ATTR isr();
-    void triggerHaptic();
+    // void triggerHaptic(); // Moved to public
 
     volatile bool sym_active;
     volatile bool shift_active;

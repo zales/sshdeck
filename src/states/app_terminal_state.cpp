@@ -51,16 +51,25 @@ void AppTerminalState::update(App& app) {
     if (app.touch().available()) {
         TouchEvent te = app.touch().read();
         bool scrollChanged = false;
+        
+        // Calculate scroll amount based on swipe length (kinetic feel)
+        // Base 5 lines, +1 line for every ~8px of extra swipe distance
+        int lines = 5;
+        if (te.magnitude > 20) {
+            lines += (te.magnitude - 20) / 8;
+        }
+        if (lines > 30) lines = 30; // Limit to ~1 page per swipe
+        
         if (te.gesture == GESTURE_SWIPE_DOWN) {
             // Swipe down on screen = scroll back into history
             app.terminal().lock();
-            app.terminal().scrollViewUp(5);
+            app.terminal().scrollViewUp(lines);
             app.terminal().unlock();
             scrollChanged = true;
         } else if (te.gesture == GESTURE_SWIPE_UP) {
             // Swipe up on screen = scroll forward toward live
             app.terminal().lock();
-            app.terminal().scrollViewDown(5);
+            app.terminal().scrollViewDown(lines);
             app.terminal().unlock();
             scrollChanged = true;
         } else if (te.gesture == GESTURE_SINGLE_TAP) {

@@ -287,85 +287,215 @@ void UIManager::drawConnectingScreen(const String& ssid, const String& password,
          u8g2.setForegroundColor(GxEPD_BLACK);
          u8g2.setBackgroundColor(GxEPD_WHITE);
          
-         u8g2.setCursor(10, 80);
-         String msg = "Connecting to:\n" + ssid;
-         u8g2.print(msg);
+         int w = width();
+
+         String label = "Connecting to:";
+         int tw = u8g2.getUTF8Width(label.c_str());
+         u8g2.setCursor((w - tw) / 2, 80);
+         u8g2.print(label);
+         
+         // SSID centered below
+         tw = u8g2.getUTF8Width(ssid.c_str());
+         u8g2.setCursor((w - tw) / 2, 110);
+         u8g2.print(ssid);
          
          u8g2.setFont(u8g2_font_helvR10_tr);
-         u8g2.setCursor(10, 120);
-         u8g2.print("Password: " + String(password.length() > 0 ? "***" : "Open"));
+         String passMsg = "Password: " + String(password.length() > 0 ? "***" : "Open");
+         tw = u8g2.getUTF8Width(passMsg.c_str());
+         u8g2.setCursor((w - tw) / 2, 150);
+         u8g2.print(passMsg);
     });
 }
 
-void UIManager::drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, bool navOnly) {
+void UIManager::drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, int scrollOffset, bool navOnly, int prevSelectedIndex) {
     
-    const int itemsStartY = 32;
+    // Touch-friendly layout
+    const int startY = 32; 
+    const int lineH = 45; // Larger hit targets
+    const int footerH = 35; // Space for Back button
     
+    int w = display.getWidth();
+    int h = display.getHeight();
+    int listH = h - startY - footerH;
+    int maxItems = listH / lineH; 
+    
+    // Calculate effective offset first to determine optimization
+    int offset = 0;
+    if (scrollOffset >= 0) {
+        offset = scrollOffset;
+    } else {
+        if (items.size() > (size_t)maxItems) {
+            if (selectedIndex >= maxItems) {
+                offset = selectedIndex - (maxItems - 1);
+                if (offset < 0) offset = 0;
+                if ((size_t)(offset + maxItems) > items.size()) offset = items.size() - maxItems;
+            }
+        }
+    }
+    // Clamp offset
+    if (offset < 0) offset = 0;
+    if (items.size() > (size_t)maxItems && (size_t)(offset + maxItems) > items.size()) {
+         offset = items.size() - maxItems;
+    } else if (items.size() <= (size_t)maxItems) {
+         offset = 0;
+    }
+
     if (navOnly) {
-        // Navigation: partial window for items area only (below header+gap)
-        display.setPartialWindow(0, itemsStartY, display.getWidth(), display.getHeight() - itemsStartY);
+        bool optimized = false;
+        
+        // If we have previous selection, and offset/page is potentially stable
+        // we can try to optimize the partial window.
+        // We assume 'scrollOffset' changing implies a full list scroll, so we only optimize if caller promises offset didn't change (implied by this logic if we trust scrollOffset arg).
+        // Since we recalculated 'offset' above based on 'selectedIndex' (if scrollOffset==-1), we must check if offset changed relative to... well we don't know the old offset here easily without state.
+        // BUT, if scrollOffset IS provided (!= -1), it means the caller manages it.
+        // If the caller passed same scrollOffset, and just diff index, we can optimize.
+        
+        if (prevSelectedIndex != -1 && scrollOffset != -1) {
+             // Calculate relative indices on screen
+             int oldRel = prevSelectedIndex - offset;
+             int newRel = selectedIndex - offset;
+             
+             // Check if both are visible
+             if (oldRel >= 0 && oldRel < maxItems && newRel >= 0 && newRel < maxItems) {
+                 // Optimization Possible!
+                 // Determine range of rows to update
+                 int rowMin = (oldRel < newRel) ? oldRel : newRel;
+                 int rowMax = (oldRel > newRel) ? oldRel : newRel;
+                 
+                 int updateY = startY + rowMin * lineH;
+                 int updateH = (rowMax - rowMin + 1) * lineH;
+                 
+                 // Expand slightly to be safe with borders
+                 display.setPartialWindow(0, updateY, w, updateH);
+                 optimized = true;
+             }
+        }
+        
+        if (!optimized) {
+            // Navigation: partial window for items area only (below header+gap)
+            display.setPartialWindow(0, startY, w, h - startY);
+        }
     } else {
         // Initial draw: full refresh with header
         beginScreen(SCREEN_FULL, title);
     }
     
     render([&](U8G2_FOR_ADAFRUIT_GFX& u8g2) {
-        int w = display.getWidth();
-        int h = display.getHeight();
-        
         // Draw header into buffer — only actually refreshed on full mode
         drawHeader(title);
         
         u8g2.setForegroundColor(GxEPD_BLACK);
         u8g2.setBackgroundColor(GxEPD_WHITE);
-        u8g2.setFont(u8g2_font_helvR12_tr);
-        
-        int startY = 32; 
-        int lineH = 22;
-        int maxItems = (h - startY - 20) / lineH; 
-        
-        int offset = 0;
-        if (items.size() > maxItems) {
-            if (selectedIndex >= maxItems) {
-                offset = selectedIndex - maxItems + 1;
-            }
-        }
+        u8g2.setFont(u8g2_font_helvR12_tr); // Larger font
         
         for (int i = 0; i < maxItems; i++) {
             int idx = i + offset;
-            if (idx >= items.size()) break;
+            if (idx >= (int)items.size()) break;
             
             int y = startY + (i) * lineH;
             
-            // Highlight selection
+            // 1. Clear the row background first (essential for partial redraws to erase old selection)
+            display.fillRect(0, y, w, lineH, GxEPD_WHITE);
+
+            // 2. Draw Item Style
+            // Common geometry for all cards
+            int cardMargin = 4;
+            int rightMargin = cardMargin;
+             
+            // If scrollbar is visible, make room for it on the right
+            if (items.size() > (size_t)maxItems) {
+                 rightMargin = 14; 
+            }
+
             if (idx == selectedIndex) {
-                 display.fillRect(0, y, w, lineH, GxEPD_BLACK);
+                 // Selected: Black Filled Rounded Card
+                 display.getDisplay().fillRoundRect(cardMargin, y + 2, w - cardMargin - rightMargin, lineH - 4, 8, GxEPD_BLACK);
+                 
                  u8g2.setForegroundColor(GxEPD_WHITE);
                  u8g2.setBackgroundColor(GxEPD_BLACK);
-                 
-                 // Little adjust for text vertical align in filled box
-                 u8g2.setCursor(5, y + 16); 
+                 u8g2.setFont(u8g2_font_helvB12_tr); // Bold font for selection
             } else {
+                 // Unselected: Black Outlined Rounded Card
+                 display.getDisplay().drawRoundRect(cardMargin, y + 2, w - cardMargin - rightMargin, lineH - 4, 8, GxEPD_BLACK);
+
                  u8g2.setForegroundColor(GxEPD_BLACK);
                  u8g2.setBackgroundColor(GxEPD_WHITE);
-                 u8g2.setCursor(5, y + 16);
+                 u8g2.setFont(u8g2_font_helvR12_tr); // Regular font
             }
             
+            // Vertically center text
+            // Adjust textY for font baseline
+            int textY = y + (lineH + 8) / 2; 
+            u8g2.setCursor(20, textY); // More padding on left
             u8g2.print(items[idx]);
         }
         
-        // Scroll Indicators
+        // --- Floating Back Button ---
+        // Instead of a full footer bar, draw a stylish pill button if needed
+        int footerCenterY = h - (footerH / 2);
+        
+        // Clean footer area slightly
+        if (navOnly) {
+             // In navOnly we might not want to redraw footer if not needed, 
+             // but 'Back' is always there.
+        } else {
+             // Draw clean footer area
+             // display.fillRect(0, h - footerH, w, footerH, GxEPD_WHITE);
+        }
+        
+        // Draw Button Shape
+        int btnW = 100;
+        int btnH = 28;
+        // Position: Bottom Left with margin
+        int btnX = 6; 
+        int btnY = h - footerH + (footerH - btnH)/2;
+        
+        // Clear button area
+        display.fillRect(0, h - footerH, w, footerH, GxEPD_WHITE);
+        
+        // Draw Pill
+        display.getDisplay().drawRoundRect(btnX, btnY, btnW, btnH, 14, GxEPD_BLACK); // Outline only looks cleaner
+        // Or filled: 
+        // display.getDisplay().fillRoundRect(btnX, btnY, btnW, btnH, 14, GxEPD_BLACK); 
+        
         u8g2.setForegroundColor(GxEPD_BLACK);
         u8g2.setBackgroundColor(GxEPD_WHITE);
-        u8g2.setFont(u8g2_font_profont12_tf);
-        if (offset > 0) {
-             u8g2.setCursor(w - 10, startY);
-             u8g2.print("^");
+        u8g2.setFont(u8g2_font_helvB10_tr);
+        String backText = "BACK";
+        int bw = u8g2.getUTF8Width(backText.c_str());
+        u8g2.setCursor(btnX + (btnW - bw)/2, btnY + 19);
+        u8g2.print(backText);
+        
+        // Scroll Indicators and Scrollbar
+        // Only if we are not in optimized mode (optimized mode means we usually stay inside the list)
+        
+        // 1. Vertical Scrollbar (Stylish Line)
+        int totalItems = items.size();
+        if (totalItems > maxItems) {
+            int sbX = w - 6;
+            int sbY = startY;
+            int sbH = h - startY - footerH;
+            
+            // Track (Thin line)
+            display.getDisplay().drawFastVLine(sbX + 2, sbY, sbH, GxEPD_BLACK);
+            
+            // Thumb
+            // Calculate height proportional to view
+            int thumbH = (maxItems * sbH) / totalItems;
+            if (thumbH < 10) thumbH = 10; // Min height
+            
+            // Calculate position
+            // offset 0 -> top
+            // offset max -> bottom
+            int maxOffset = totalItems - maxItems;
+            int thumbY = sbY + (offset * (sbH - thumbH)) / maxOffset;
+            
+            // Draw thumb (Rounded Pill)
+            display.getDisplay().fillRoundRect(sbX, thumbY, 5, thumbH, 2, GxEPD_BLACK);
         }
-        if (offset + maxItems < items.size()) {
-             u8g2.setCursor(w - 10, h - 5);
-             u8g2.print("v");
-        }
+        
+        // 2. Chevron Indicators REMOVED by user request
+        // (Previously drew arrows here)
     });
     if (!navOnly) {
         endScreen();
@@ -393,15 +523,15 @@ void UIManager::drawInputScreen(const String& title, const String& currentText, 
             u8g2.setFont(u8g2_font_helvB12_tr);
             u8g2.setCursor(5, 18);
             u8g2.print(title);
-    
-            // Footer
-            int footerH = 16;
-            display.fillRect(0, h - footerH, w, footerH, GxEPD_BLACK);
-            u8g2.setForegroundColor(GxEPD_WHITE);
-            u8g2.setBackgroundColor(GxEPD_BLACK);
-            u8g2.setFont(u8g2_font_profont12_tf); 
-            u8g2.setCursor(5, h - 4);
-            u8g2.print("Type: Keys | Enter: OK | Esc: Cancel");
+            
+            // Draw Back button
+            int footerH = 35;
+            int footerY = h - footerH;
+            display.fillRect(0, footerY, w, 1, GxEPD_BLACK);
+            u8g2.setForegroundColor(GxEPD_BLACK);
+            u8g2.setBackgroundColor(GxEPD_WHITE);
+            u8g2.setCursor(20, footerY + 25);
+            u8g2.print("< BACK");
         }
         
         // Input Box - Always drawn
@@ -575,6 +705,41 @@ void UIManager::drawTerminal(const TerminalEmulator& term, const String& statusT
                     u8g2.print(cursorChar);
                 }
             }
+        }
+
+        // --- VISUAL HISTORY INDICATOR ---
+        if (term.isViewingHistory()) {
+            int w = display.getWidth();
+            int h = display.getHeight();
+            
+            // Floating Pill at Bottom Right
+            int badgeH = 24;
+            int badgeW = 75;
+            int bx = w - badgeW - 4;
+            int by = h - badgeH - 4;
+            
+            // Draw Badge
+            display.getDisplay().fillRoundRect(bx, by, badgeW, badgeH, 6, GxEPD_BLACK);
+            // Optional: Inner white border for contrast
+            display.getDisplay().drawRoundRect(bx + 1, by + 1, badgeW - 2, badgeH - 2, 6, GxEPD_WHITE);
+
+            u8g2.setForegroundColor(GxEPD_WHITE);
+            u8g2.setBackgroundColor(GxEPD_BLACK);
+            
+            // Icons
+            u8g2.setFont(u8g2_font_open_iconic_arrow_1x_t);
+            // Up Arrow (Left side) - Indicates "Older"
+            u8g2.drawGlyph(bx + 8, by + 17, 0x42); 
+            
+            // Down Arrow (Right side) - Indicates "Newer"
+            u8g2.drawGlyph(bx + badgeW - 16, by + 17, 0x3F);
+
+            // Centered Offset Number
+            u8g2.setFont(u8g2_font_helvB10_tr);
+            String txt = String(term.getViewOffset());
+            int tw = u8g2.getUTF8Width(txt.c_str());
+            u8g2.setCursor(bx + (badgeW - tw)/2, by + 18);
+            u8g2.print(txt);
         }
     });
 }

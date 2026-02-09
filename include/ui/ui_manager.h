@@ -70,7 +70,7 @@ public:
     void drawStatusBar(const String& title, bool wifiConnected, int batteryPercent, bool isCharging);
     
     // Generic
-    void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, bool navOnly = false);
+    void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, int scrollOffset = -1, bool navOnly = false, int prevSelectedIndex = -1);
     void drawInputScreen(const String& title, const String& currentText, bool isPassword = false, bool textOnly = false);
     void drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected, bool partial = true);
     void drawHelpScreen();

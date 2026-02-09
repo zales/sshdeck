@@ -53,10 +53,15 @@ void AppMenuState::update(App& app) {
         app.display().unlock();
     }
     
+    // Check Touch Input
+    if (app.touch().available()) {
+        app.menu()->handleTouch(app.touch().read());
+    }
+    
     // Sleep when idle: menu state is mostly waiting for user input.
     // 50ms delay saves significant CPU power while keeping UI responsive
     // (keyboard events are buffered by TCA8418 hardware + FreeRTOS queue).
-    if (!app.keyboard().available()) {
+    if (!app.keyboard().available() && !app.menu()->getOnLoop()) {
         delay(50);
     }
 }

@@ -3,6 +3,8 @@
 #include "keymap.h"
 #include <Preferences.h>
 
+KeyboardManager* KeyboardManager::instance = nullptr;
+
 // Static handle for ISR
 static TaskHandle_t keyboardIntTask = NULL;
 
@@ -16,6 +18,11 @@ void IRAM_ATTR KeyboardManager::isr() {
 
 KeyboardManager::KeyboardManager() 
     : sym_active(false), shift_active(false), ctrl_active(false), alt_active(false), pwrBtnStart(0) {
+    instance = this;
+}
+
+KeyboardManager* KeyboardManager::getInstance() {
+    return instance;
 }
 
 void KeyboardManager::loop() {
