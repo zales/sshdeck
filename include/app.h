@@ -21,6 +21,7 @@
 #include "system_context.h"
 #include "controllers/settings_controller.h"
 #include "controllers/connection_controller.h"
+#include "controllers/script_controller.h"
 
 // Forward declare states
 class AppMenuState;
@@ -52,7 +53,7 @@ public:
 
     // Menu Handlers
     void handleMainMenu() override;
-    void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name) override;
+    void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name, const String& script = "") override;
 
     // Getters (ISystemContext implementation)
     DisplayManager& display() override { return _display; }
@@ -71,6 +72,7 @@ public:
 
     SettingsController& settingsController() { return *_settingsController; }
     ConnectionController& connectionController() { return *_connectionController; }
+    ScriptController& scriptController() { return *_scriptController; }
 
     // Special setters for unique_ptrs
     void resetMenu(MenuSystem* m) { _menu.reset(m); }
@@ -95,6 +97,7 @@ private:
     // Controllers
     std::unique_ptr<SettingsController> _settingsController;
     std::unique_ptr<ConnectionController> _connectionController;
+    std::unique_ptr<ScriptController> _scriptController;
 
     // State
     std::unique_ptr<AppState> _currentState;

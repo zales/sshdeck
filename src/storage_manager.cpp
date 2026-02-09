@@ -2,11 +2,14 @@
 #include "board_def.h"
 #include "USB.h"
 #include "USBMSC.h"
+#include <ArduinoJson.h>
+#include <LittleFS.h>
 
 // RAM Disk Configuration
-// 128KB Disk (256 sectors). 
+// 8KB Disk for Key Exchange (16 sectors). 
+// Reduced from 128KB to save heap on S3 without PSRAM.
 #define RAM_DISK_SECTOR_SIZE 512
-#define RAM_DISK_SECTOR_COUNT 256
+#define RAM_DISK_SECTOR_COUNT 16
 
 static uint8_t* ramDiskBuffer = nullptr;
 USBMSC MSC;
@@ -45,8 +48,8 @@ static void formatRAMDisk() {
     bs[16] = 0x02;
     // Root Entries: 64 
     bs[17] = 0x40; bs[18] = 0x00;
-    // Total Sectors (16-bit): 256
-    bs[19] = 0x00; bs[20] = 0x01; // 0x0100 = 256
+    // Total Sectors (16-bit): 16
+    bs[19] = 0x10; bs[20] = 0x00; // 0x0010 = 16 sectors
     // Media Descriptor: 0xF8 (Fixed disk)
     bs[21] = 0xF8;
     // Sectors Per FAT: 1
@@ -129,9 +132,97 @@ static int32_t onWrite(uint32_t lba, uint32_t offset, uint8_t* buffer, uint32_t 
 StorageManager::StorageManager() : isMounted(false) {}
 
 bool StorageManager::begin() {
+    // Try to mount LittleFS for internal storage (Scripts)
+    // Format if mount fails
+    if (!LittleFS.begin(true)) {
+        Serial.println("LittleFS Mount Failed");
+    }
+
+    // Try to mount SD for Keys/external storage
     pinMode(BOARD_SD_CS, OUTPUT);
-    // SPI initialization is handled by SD.begin()
-    return SD.begin(BOARD_SD_CS, SPI);
+    if (SD.begin(BOARD_SD_CS, SPI)) {
+        isMounted = true;
+    } else {
+        isMounted = false;
+        Serial.println("SD Mount Failed");
+    }
+
+    // Always try to load scripts (now from LittleFS)
+    loadScripts(); 
+    return true;
+}
+
+void StorageManager::loadScripts() {
+    _scripts.clear();
+    
+    // scripts.json is now stored in internal LittleFS
+    if (!LittleFS.exists("/scripts.json")) {
+        // Create default example if missing
+        Script s;
+        s.name = "Hello World";
+        s.command = "echo 'Hello from SSHDeck'";
+        _scripts.push_back(s);
+        saveScripts();
+        return;
+    }
+
+    File file = LittleFS.open("/scripts.json", "r");
+    if (!file) {
+        return;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, file);
+    if (!error) {
+        JsonArray arr = doc.as<JsonArray>();
+        for (JsonObject obj : arr) {
+            Script s;
+            s.name = obj["name"].as<String>();
+            s.command = obj["command"].as<String>();
+            _scripts.push_back(s);
+        }
+    }
+    file.close();
+}
+
+void StorageManager::saveScripts() {
+    File file = LittleFS.open("/scripts.json", "w");
+    if (!file) return;
+    
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    
+    for (const auto& s : _scripts) {
+        JsonObject obj = arr.add<JsonObject>();
+        obj["name"] = s.name;
+        obj["command"] = s.command;
+    }
+    
+    serializeJson(doc, file);
+    file.close();
+}
+
+std::vector<Script>& StorageManager::getScripts() {
+    return _scripts;
+}
+
+void StorageManager::addScript(const Script& script) {
+    _scripts.push_back(script);
+    saveScripts();
+}
+
+void StorageManager::updateScript(int index, const Script& script) {
+    if (index >= 0 && index < (int)_scripts.size()) {
+        _scripts[index] = script;
+        saveScripts();
+    }
+}
+
+void StorageManager::deleteScript(int index) {
+    if (index >= 0 && index < (int)_scripts.size()) {
+        _scripts.erase(_scripts.begin() + index);
+        saveScripts();
+    }
 }
 
 bool StorageManager::startUSBMode() {

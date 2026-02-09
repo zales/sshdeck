@@ -9,7 +9,7 @@ MenuSystem::MenuSystem(UIManager& u)
 void MenuSystem::showMenu(const String& title, const std::vector<String>& items, std::function<void(int)> onSelect, std::function<void()> onBack) {
     config.title = title;
     config.items = items;
-    config.selected = 0;
+    config.selected = -1; // Start with no selection for touch-first UX
     config.scrollOffset = 0;
     config.onSelect = onSelect;
     config.onBack = onBack;
@@ -57,7 +57,7 @@ void MenuSystem::reset() {
 void MenuSystem::draw(bool partial, int prevSelected) {
     switch (state) {
         case MENU_LIST:
-            ui.drawMenu(config.title, config.items, config.selected, config.scrollOffset, partial, prevSelected);
+            ui.drawMenu(config.title, config.items, config.selected, config.scrollOffset, partial, prevSelected, (bool)config.onBack);
             break;
         case MENU_INPUT:
             ui.drawInputScreen(config.title, config.inputText, config.isPassword, partial);
@@ -78,12 +78,12 @@ bool MenuSystem::handleTouch(TouchEvent t, bool suppressDraw) {
     if (t.gesture == GESTURE_NONE) return false;
     
     int h = ui.height();
-    const int startY = 32;
-    const int footerH = 35;
-    const int lineH = 45;
+    const int startY = MENU_START_Y;
+    int footerH = (config.onBack) ? MENU_FOOTER_H : 0;
+    const int lineH = MENU_ITEM_H;
     
     // 1. Check footer (Back Button)
-    if (t.gesture == GESTURE_SINGLE_TAP && t.y > h - footerH) {
+    if (t.gesture == GESTURE_SINGLE_TAP && t.y > h - footerH && footerH > 0) {
         // Bottom area tapped.
         // Used for BACK
         if (config.onBack) {
@@ -182,7 +182,7 @@ bool MenuSystem::handleInput(InputEvent e, bool suppressDraw) {
 
     if (state == MENU_LIST) {
         bool changed = false;
-        int maxItems = (ui.height() - 32 - 35) / 45;
+        int maxItems = (ui.height() - MENU_START_Y - ((config.onBack) ? MENU_FOOTER_H : 0)) / MENU_ITEM_H;
         
         int oldSelected = config.selected;
         int oldOffset = config.scrollOffset;
@@ -191,15 +191,25 @@ bool MenuSystem::handleInput(InputEvent e, bool suppressDraw) {
         bool down = (c == 's'); 
         
         if (up) {
-            config.selected--;
-            if (config.selected < 0) config.selected = config.items.size() - 1;
+            if (config.selected == -1) {
+                config.selected = config.items.size() - 1;
+            } else {
+                config.selected--;
+                if (config.selected < 0) config.selected = config.items.size() - 1;
+            }
             changed = true;
         } else if (down) {
-            config.selected++;
-            if (config.selected >= (int)config.items.size()) config.selected = 0;
+            if (config.selected == -1) {
+                config.selected = 0;
+            } else {
+                config.selected++;
+                if (config.selected >= (int)config.items.size()) config.selected = 0;
+            }
             changed = true;
         } else if (c == '\n') { // Enter
-            if (config.onSelect) config.onSelect(config.selected);
+            if (config.selected != -1) {
+                if (config.onSelect) config.onSelect(config.selected);
+            }
             return true; 
         } else if (c == 0x1B || c == 0x03 || c == 0x11) { // ESC
             if (config.onBack) config.onBack();

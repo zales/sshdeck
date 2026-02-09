@@ -4,12 +4,6 @@
 #include <mbedtls/pkcs5.h>
 #include <cstring>
 
-// Legacy hardcoded salt for backwards compatibility with existing devices
-static const unsigned char LEGACY_PBKDF2_SALT[16] = { 
-    0x5A, 0x45, 0x52, 0x4F, 0x53, 0x41, 0x4C, 0x54,
-    0x44, 0x45, 0x43, 0x4B, 0x50, 0x52, 0x4F, 0x31
-};
-
 // PBKDF2 iterations (10,000 is minimum recommended, higher = slower but more secure)
 static const int PBKDF2_ITERATIONS = 10000;
 
@@ -25,14 +19,9 @@ void SecurityManager::begin() {
     if (prefs.isKey("salt")) {
         prefs.getBytes("salt", pbkdf2Salt, sizeof(pbkdf2Salt));
     } else {
-        if (!prefs.isKey("challenge")) {
-            // Fresh install - generate unique random salt
-            for (int i = 0; i < 16; i++) {
-                pbkdf2Salt[i] = (unsigned char)(esp_random() & 0xFF);
-            }
-        } else {
-            // Legacy device with existing data - use hardcoded salt for compatibility
-            memcpy(pbkdf2Salt, LEGACY_PBKDF2_SALT, 16);
+        // Fresh install - generate unique random salt
+        for (int i = 0; i < 16; i++) {
+            pbkdf2Salt[i] = (unsigned char)(esp_random() & 0xFF);
         }
         prefs.putBytes("salt", pbkdf2Salt, sizeof(pbkdf2Salt));
     }

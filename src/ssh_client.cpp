@@ -279,6 +279,24 @@ void SSHClient::disconnect() {
 void SSHClient::process() {
     if (_state != CONNECTED) return;
     
+    // Process Startup Command if any
+    if (_startupCommand.length() > 0) {
+        String scriptName = ""; 
+        // We don't have the script name here, only the command. 
+        // Just indicate we are running something.
+        terminal.appendString("\n[AutoRun] Executing script...\n");
+        
+        if (!_startupCommand.endsWith("\n")) {
+             _startupCommand += "\n";
+        }
+        
+        if (xSemaphoreTake(_sessionMutex, 100)) {
+            ssh_channel_write(channel, _startupCommand.c_str(), _startupCommand.length());
+            xSemaphoreGive(_sessionMutex);
+            _startupCommand = ""; // Executed
+        }
+    }
+
     // Reset shortcut flag if Mic released
     if (!keyboard.isMicActive()) {
         mic_shortcut_used = false;

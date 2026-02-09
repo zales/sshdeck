@@ -34,12 +34,15 @@ public:
     const String& getConnectedHost() const { return connectedHost; }
     void process();  // Call in loop to handle SSH I/O
     void write(char c); // Inject key
+    void setStartupCommand(const String& cmd) { _startupCommand = cmd; }
     
 private:
     TerminalEmulator& terminal;
     KeyboardManager& keyboard;
     std::function<void()> onRefresh;
     std::function<void()> onHelp;
+    
+    String _startupCommand;
     
     ssh_session session;
     ssh_channel channel;

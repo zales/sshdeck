@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <FS.h>
 #include <SD.h>
+#include <vector>
+#include "script_def.h"
 
 class StorageManager {
 public:
@@ -11,6 +13,16 @@ public:
     // Checks if SD card is available and initializes if needed
     bool begin();
     
+    // Script Management
+    // Loads from /scripts.json
+    void loadScripts(); 
+    void saveScripts();
+    
+    std::vector<Script>& getScripts();
+    void addScript(const Script& script);
+    void updateScript(int index, const Script& script);
+    void deleteScript(int index);
+
     // Toggles USB MSC Mode
     // returns true if started, false if failed/stopped
     bool startUSBMode();
@@ -30,4 +42,5 @@ public:
     
 private:
     bool isMounted;
+    std::vector<Script> _scripts;
 };

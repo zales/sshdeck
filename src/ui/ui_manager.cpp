@@ -307,12 +307,12 @@ void UIManager::drawConnectingScreen(const String& ssid, const String& password,
     });
 }
 
-void UIManager::drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, int scrollOffset, bool navOnly, int prevSelectedIndex) {
+void UIManager::drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, int scrollOffset, bool navOnly, int prevSelectedIndex, bool showBack) {
     
     // Touch-friendly layout
-    const int startY = 32; 
-    const int lineH = 45; // Larger hit targets
-    const int footerH = 35; // Space for Back button
+    const int startY = MENU_START_Y; 
+    const int lineH = MENU_ITEM_H; 
+    const int footerH = showBack ? MENU_FOOTER_H : 0; 
     
     int w = display.getWidth();
     int h = display.getHeight();
@@ -420,7 +420,7 @@ void UIManager::drawMenu(const String& title, const std::vector<String>& items, 
 
                  u8g2.setForegroundColor(GxEPD_BLACK);
                  u8g2.setBackgroundColor(GxEPD_WHITE);
-                 u8g2.setFont(u8g2_font_helvR12_tr); // Regular font
+                 u8g2.setFont(u8g2_font_helvB12_tr); // Bold font (was Regular)
             }
             
             // Vertically center text
@@ -431,40 +431,9 @@ void UIManager::drawMenu(const String& title, const std::vector<String>& items, 
         }
         
         // --- Floating Back Button ---
-        // Instead of a full footer bar, draw a stylish pill button if needed
-        int footerCenterY = h - (footerH / 2);
-        
-        // Clean footer area slightly
-        if (navOnly) {
-             // In navOnly we might not want to redraw footer if not needed, 
-             // but 'Back' is always there.
-        } else {
-             // Draw clean footer area
-             // display.fillRect(0, h - footerH, w, footerH, GxEPD_WHITE);
+        if (showBack) {
+            drawBackButton(u8g2);
         }
-        
-        // Draw Button Shape
-        int btnW = 100;
-        int btnH = 28;
-        // Position: Bottom Left with margin
-        int btnX = 6; 
-        int btnY = h - footerH + (footerH - btnH)/2;
-        
-        // Clear button area
-        display.fillRect(0, h - footerH, w, footerH, GxEPD_WHITE);
-        
-        // Draw Pill
-        display.getDisplay().drawRoundRect(btnX, btnY, btnW, btnH, 14, GxEPD_BLACK); // Outline only looks cleaner
-        // Or filled: 
-        // display.getDisplay().fillRoundRect(btnX, btnY, btnW, btnH, 14, GxEPD_BLACK); 
-        
-        u8g2.setForegroundColor(GxEPD_BLACK);
-        u8g2.setBackgroundColor(GxEPD_WHITE);
-        u8g2.setFont(u8g2_font_helvB10_tr);
-        String backText = "BACK";
-        int bw = u8g2.getUTF8Width(backText.c_str());
-        u8g2.setCursor(btnX + (btnW - bw)/2, btnY + 19);
-        u8g2.print(backText);
         
         // Scroll Indicators and Scrollbar
         // Only if we are not in optimized mode (optimized mode means we usually stay inside the list)
@@ -525,13 +494,7 @@ void UIManager::drawInputScreen(const String& title, const String& currentText, 
             u8g2.print(title);
             
             // Draw Back button
-            int footerH = 35;
-            int footerY = h - footerH;
-            display.fillRect(0, footerY, w, 1, GxEPD_BLACK);
-            u8g2.setForegroundColor(GxEPD_BLACK);
-            u8g2.setBackgroundColor(GxEPD_WHITE);
-            u8g2.setCursor(20, footerY + 25);
-            u8g2.print("< BACK");
+            drawBackButton(u8g2);
         }
         
         // Input Box - Always drawn
@@ -824,6 +787,33 @@ void UIManager::drawHeader(const String& title) {
     // Reset
     u8g2.setForegroundColor(GxEPD_BLACK);
     u8g2.setBackgroundColor(GxEPD_WHITE);
+}
+
+void UIManager::drawBackButton(U8G2_FOR_ADAFRUIT_GFX& u8g2) {
+    int w = width();
+    int h = height();
+    int footerH = 35; // Standard footer height for button
+    
+    // Draw Button Shape
+    int btnW = 100;
+    int btnH = 28;
+    // Position: Bottom Left with margin
+    int btnX = 6; 
+    int btnY = h - footerH + (footerH - btnH)/2;
+    
+    // Clear button area
+    display.fillRect(0, h - footerH, w, footerH, GxEPD_WHITE);
+    
+    // Draw Pill
+    display.getDisplay().drawRoundRect(btnX, btnY, btnW, btnH, 14, GxEPD_BLACK); 
+    
+    u8g2.setForegroundColor(GxEPD_BLACK);
+    u8g2.setBackgroundColor(GxEPD_WHITE);
+    u8g2.setFont(u8g2_font_helvB10_tr);
+    String backText = "BACK";
+    int bw = u8g2.getUTF8Width(backText.c_str());
+    u8g2.setCursor(btnX + (btnW - bw)/2, btnY + 19); // +19 centers vertically in 28px
+    u8g2.print(backText);
 }
 
 void UIManager::drawFooter(const String& message) {

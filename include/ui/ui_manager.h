@@ -24,6 +24,11 @@ static const int CONTENT_Y   = 18;   // First usable Y for content (below header
 static const int FOOTER_H    = 16;   // Footer bar height
 static const int LINE_H      = 16;   // Standard line height for menus/lists
 
+// Touch Menu Layout Constants
+static const int MENU_START_Y  = 32;
+static const int MENU_ITEM_H   = 45;
+static const int MENU_FOOTER_H = 35; // Touch target for generic footer buttons
+
 class UIManager {
 public:
     UIManager(DisplayManager& display);
@@ -70,7 +75,7 @@ public:
     void drawStatusBar(const String& title, bool wifiConnected, int batteryPercent, bool isCharging);
     
     // Generic
-    void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, int scrollOffset = -1, bool navOnly = false, int prevSelectedIndex = -1);
+    void drawMenu(const String& title, const std::vector<String>& items, int selectedIndex, int scrollOffset = -1, bool navOnly = false, int prevSelectedIndex = -1, bool showBack = true);
     void drawInputScreen(const String& title, const String& currentText, bool isPassword = false, bool textOnly = false);
     void drawTerminal(const TerminalEmulator& term, const String& statusTitle, int batteryPercent, bool isCharging, bool wifiConnected, bool partial = true);
     void drawHelpScreen();
@@ -98,6 +103,9 @@ public:
     void drawFastHLine(int x, int y, int w, uint16_t color);
 
     void updateStatusState(int bat, bool charging, bool wifi);
+    
+    // Helpers
+    void drawBackButton(U8G2_FOR_ADAFRUIT_GFX& u8g2);
 
 private:
     DisplayManager& display;

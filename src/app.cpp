@@ -11,6 +11,7 @@ App::App()
     : _ui(_display), _wifi(_terminal, _keyboard, _ui, _power), _ota(_display), _currentState(nullptr), _nextState(nullptr), _lastAniUpdate(0), _lastScreenRefresh(0), _refreshPending(false) {
     _settingsController.reset(new SettingsController(*this));
     _connectionController.reset(new ConnectionController(*this));
+    _scriptController.reset(new ScriptController(*this));
 }
 
 App::~App() {
@@ -29,6 +30,13 @@ void App::setup() {
     _wifi.connectAsync(); 
     
     _ota.begin();
+    
+    if (_storage.begin()) {
+        _ui.updateBootStatus("Storage OK");
+    } else {
+        _ui.updateBootStatus("Storage FAIL");
+        Serial.println("SD Card Mount Failed");
+    }
 
     _serverManager.setSecurityManager(&_security);
     _serverManager.begin();
@@ -177,14 +185,16 @@ void App::handleMainMenu() {
     std::vector<String> items = {
         "Saved Servers",
         "Quick Connect",
+        "Custom Commands",
         "Settings",
         "Power Off"
     };
     _menu->showMenu("Main Menu", items, [this](int choice) {
         if (choice == 0) _connectionController->showSavedServers();
         else if (choice == 1) _connectionController->showQuickConnect();
-        else if (choice == 2) _settingsController->showSettingsMenu();
-        else if (choice == 3) enterDeepSleep();
+        else if (choice == 2) _scriptController->showScriptMenu();
+        else if (choice == 3) _settingsController->showSettingsMenu();
+        else if (choice == 4) enterDeepSleep();
     });
 }
 
@@ -277,7 +287,7 @@ void App::showHelpScreen() {
     drawTerminalScreen();
 }
 
-void App::connectToServer(const String& host, int port, const String& user, const String& pass, const String& name) {
+void App::connectToServer(const String& host, int port, const String& user, const String& pass, const String& name, const String& script) {
     // Show connecting message first (non-blocking render, but next steps might block network)
     // We can't easily make LibSSH non-blocking in this codebase without major rewrite.
     // So we accept that the UI freezes during "Connecting..."
@@ -295,6 +305,9 @@ void App::connectToServer(const String& host, int port, const String& user, cons
     // Use lambdas for callbacks
     _sshClient->setRefreshCallback([this]() { this->requestRefresh(); });
     _sshClient->setHelpCallback([this]() { this->showHelpScreen(); });
+    if (script.length() > 0) {
+        _sshClient->setStartupCommand(script);
+    }
 
     if (WiFi.status() != WL_CONNECTED) {
             _wifi.setIdleCallback([this]() { 

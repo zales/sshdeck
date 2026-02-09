@@ -39,5 +39,5 @@ public:
 
     // Logic Handlers required by controllers
     virtual void handleMainMenu() = 0;
-    virtual void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name) = 0;
+    virtual void connectToServer(const String& host, int port, const String& user, const String& pass, const String& name, const String& script = "") = 0;
 };
