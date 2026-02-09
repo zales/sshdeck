@@ -2,6 +2,7 @@
 
 TerminalEmulator::TerminalEmulator() 
     : cursor_x(0), cursor_y(0), saved_cursor_x(0), saved_cursor_y(0),
+      saved_cursor_x_1049(0), saved_cursor_y_1049(0),
       current_inverse(false), ansi_state(ANSI_NORMAL),
       show_cursor(true), application_cursor_mode(false), need_display_update(false),
       scrollTop(0), scrollBottom(TERM_ROWS - 1),
@@ -741,11 +742,15 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                      } else if (params[i] == 47 || params[i] == 1047 || params[i] == 1049) {
                          // Switch to Alternate Screen Buffer
                          if (params[i] == 1049) {
-                             saved_cursor_x = cursor_x;
-                             saved_cursor_y = cursor_y;
+                             saved_cursor_x_1049 = cursor_x;
+                             saved_cursor_y_1049 = cursor_y;
                          }
                          
                          switchBuffer(true);
+                         
+                         // Reset scroll margins when entering alt buffer
+                         scrollTop = 0;
+                         scrollBottom = TERM_ROWS - 1;
                          
                          if (params[i] == 1049) {
                              clear();
@@ -767,9 +772,13 @@ void TerminalEmulator::handleAnsiCommand(const String& cmd) {
                          // Switch to Normal Screen Buffer
                          switchBuffer(false);
                          
+                         // Reset scroll margins when returning to primary buffer to avoid stuck regions from MC/htop
+                         scrollTop = 0;
+                         scrollBottom = TERM_ROWS - 1;
+                         
                          if (params[i] == 1049) {
-                             cursor_x = saved_cursor_x;
-                             cursor_y = saved_cursor_y;
+                             cursor_x = saved_cursor_x_1049;
+                             cursor_y = saved_cursor_y_1049;
                              // Ensure bounds
                              if (cursor_x >= TERM_COLS) cursor_x = TERM_COLS - 1;
                              if (cursor_y >= TERM_ROWS) cursor_y = TERM_ROWS - 1;
